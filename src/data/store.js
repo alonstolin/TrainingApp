@@ -106,14 +106,24 @@ function schedulePersist() {
   persistTimer = setTimeout(flush, PERSIST_DEBOUNCE_MS);
 }
 
-export async function flush() {
-  clearTimeout(persistTimer);
-  persistTimer = null;
+/**
+ * Serialises all writes. `flush()` returns this chain, so awaiting it awaits
+ * everything already queued — not just the caller's own batch.
+ *
+ * Without the chain, flush() collected the dirty set and returned a promise for
+ * only that batch. A flush triggered while an earlier one was still writing
+ * would find an empty dirty set and resolve instantly, so `await flush()` in the
+ * pagehide handler could return while a just-logged set was still in flight —
+ * and iOS tears the page down immediately after pagehide.
+ */
+let writeChain = Promise.resolve();
 
+async function doPersist() {
   const ids = [...dirty];
   dirty.clear();
   const wasMetaDirty = metaDirty;
   metaDirty = false;
+  if (!ids.length && !wasMetaDirty) return;
 
   try {
     if (ids.length) {
@@ -128,12 +138,19 @@ export async function flush() {
       await db.put(db.STORES.meta, { key: 'meta', value: state.meta });
     }
   } catch (e) {
-    // Re-mark dirty so the next write retries rather than silently losing data.
+    // Re-mark dirty so a later write retries rather than silently losing data.
     for (const id of ids) dirty.add(id);
     if (wasMetaDirty) metaDirty = true;
     console.error('persist failed', e);
-    throw e;
   }
+}
+
+export function flush() {
+  clearTimeout(persistTimer);
+  persistTimer = null;
+  // Chained on both settle paths so one failed write cannot wedge the queue.
+  writeChain = writeChain.then(doPersist, doPersist);
+  return writeChain;
 }
 
 function touch(id) {
