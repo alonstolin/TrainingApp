@@ -376,10 +376,50 @@
   border-radius: var(--r-lg) var(--r-lg) 0 0;
   border-top: 1px solid var(--line-strong);
   padding: var(--sp-3) var(--sp-4) calc(var(--sp-5) + var(--safe-bottom));
-  animation: sheetin 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+  /* Vertical panning stays with the scroller; a downward drag at scrollTop 0 is
+     picked up by the pointer handlers in sheet.js. `contain` stops an overscroll
+     from rubber-banding the page behind the sheet. */
+  touch-action: pan-y;
+  overscroll-behavior: contain;
+  will-change: transform;
 }
+
+/* The entry animation is a ONE-SHOT class, removed once it has played — it is
+   deliberately not a property on .sheet that other states suppress with
+   `animation: none`. Suppressing it that way means the moment the suppressing
+   class is removed (after a spring-back) the declaration returns and the
+   animation restarts, visibly replaying the slide-in mid-interaction. */
+.sheet--entering { animation: sheetin 0.2s cubic-bezier(0.32, 0.72, 0, 1); }
 @keyframes sheetin { from { transform: translateY(100%); } }
-.sheet-grab { width: 36px; height: 4px; border-radius: var(--r-full); background: var(--line-strong); margin: 0 auto var(--sp-4); }
+
+/* A sheet short enough not to scroll can be grabbed anywhere on its face. */
+.sheet--static { touch-action: none; }
+
+/* While the finger is down, transform is driven frame-by-frame from JS, so any
+   transition would fight it and feel laggy. */
+.sheet--dragging { transition: none; }
+.sheet--settling { transition: transform 0.24s cubic-bezier(0.32, 0.72, 0, 1); }
+.sheet--closing { transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1); }
+.sheet-backdrop { transition: background-color 0.22s ease; }
+
+/* Generous drag target around the visible pill — 4px of pill is not a hit area.
+   Pinned with position:sticky so it stays reachable once the sheet is scrolled;
+   otherwise the handle scrolls away and takes the dismiss gesture with it.
+   Negative margins let its background span the sheet's full padded width. */
+.sheet-handle {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: grid;
+  place-items: center;
+  background: var(--surface);
+  padding: var(--sp-3) var(--sp-4);
+  margin: calc(var(--sp-3) * -1) calc(var(--sp-4) * -1) var(--sp-2);
+  touch-action: none;
+  cursor: grab;
+}
+.sheet-handle:active { cursor: grabbing; }
+.sheet-grab { width: 40px; height: 4px; border-radius: var(--r-full); background: var(--line-strong); }
 .sheet-title { font-size: var(--fs-lg); font-weight: 700; margin-bottom: var(--sp-1); }
 
 /* ---- Update pill -------------------------------------------------------- */
