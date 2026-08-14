@@ -97,6 +97,22 @@ No loaded spinal flexion until bracing endurance exists. The ab wheel is gated o
 
 ---
 
+## The Calendar tab
+
+Shows the plan against real dates: the fixed weekly rhythm, a month grid, and the
+coming week spelled out. Tapping any day gives the detail — for a future lift day,
+the actual movements and rep schemes you'll be walking into.
+
+The important distinction, and the reason this screen needed care: **past days are
+facts, future days are forecasts.** Because the program is cursor-driven (below),
+no future date has a session fixed to it — only a projection of what lands there
+if the weekly template is followed from here. Solid dots are things that happened;
+outlined dots are projections. Miss a session and everything after it shifts,
+which is correct behaviour rather than drift, so the screen says so rather than
+implying Wednesday is a commitment.
+
+It also projects your 10K date from your current position in the run plan.
+
 ## How the schedule works
 
 The obvious implementation — `week = floor((today − start) / 7)` — breaks the first time you miss a Wednesday: that session is silently lost, and "week 4, peak volume" arrives even though you have trained nine times.

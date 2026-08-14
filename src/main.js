@@ -7,6 +7,7 @@ import { el, onTap, clear } from './ui/dom.js';
 import { APP_VERSION } from './version.js';
 
 import mountToday from './ui/screens/today.js';
+import mountCalendar from './ui/screens/calendar.js';
 import mountSession from './ui/screens/session.js';
 import mountHistory from './ui/screens/history.js';
 import mountProgress from './ui/screens/progress.js';
@@ -116,6 +117,7 @@ async function boot() {
   }
 
   register('/', mountToday);
+  register('/calendar', mountCalendar);
   register('/session/:id', mountSession);
   register('/history', mountHistory);
   register('/progress', mountProgress);

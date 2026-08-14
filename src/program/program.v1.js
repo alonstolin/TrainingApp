@@ -64,6 +64,7 @@ export default {
     B: {
       key: 'lift:B',
       name: 'Lower',
+      short: 'Lower',
       focus: 'Legs — kept productive, not maximal. Running is also leg work.',
       blocks: [
         { exerciseId: 'back-squat', scheme: 'double_progression', sets: 3, repMin: 5, repMax: 8, rpeCap: 8, restSec: 180 },
@@ -77,6 +78,7 @@ export default {
     A: {
       key: 'lift:A',
       name: 'Upper Push',
+      short: 'Push',
       focus: 'Incline bench HEAVY · OHP volume',
       blocks: [
         {
@@ -95,6 +97,7 @@ export default {
     C: {
       key: 'lift:C',
       name: 'Upper Pull',
+      short: 'Pull',
       focus: 'Weighted pull-up HEAVY · incline volume',
       blocks: [
         {
@@ -118,6 +121,7 @@ export default {
     D: {
       key: 'lift:D',
       name: 'Shoulders & Arms',
+      short: 'Delts',
       focus: 'OHP HEAVY · pull-up volume · priority delt + arm block',
       blocks: [
         {
@@ -138,6 +142,7 @@ export default {
     E: {
       key: 'lift:E',
       name: 'Bonus — Delts & Arms',
+      short: 'Bonus',
       optional: true,
       focus: 'Pure priority volume. No heavy work, nothing to failure.',
       blocks: [
