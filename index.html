@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<!-- viewport-fit=cover is required: with a translucent status bar the layout
+     extends under the notch and home indicator, and the primary LOG SET button
+     sits exactly where the home indicator is. See env(safe-area-inset-*) usage. -->
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Training</title>
+<meta name="description" content="Strength, hypertrophy and 10K training tracker.">
+
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Training">
+<meta name="theme-color" content="#0d0d0d">
+<meta name="color-scheme" content="dark">
+
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./assets/icons/apple-touch-icon-180.png">
+<link rel="icon" href="./assets/icons/favicon.svg" type="image/svg+xml">
+
+<link rel="stylesheet" href="./styles/tokens.css">
+<link rel="stylesheet" href="./styles/base.css">
+<link rel="stylesheet" href="./styles/components.css">
+</head>
+<body>
+
+<div id="app">
+  <div class="boot">
+    <div class="boot-mark">TRAINING</div>
+    <div class="boot-note">Loading…</div>
+  </div>
+</div>
+
+<!-- Rest timer: lives outside the screen container so it survives navigation. -->
+<div id="rest-bar" class="rest-bar" hidden></div>
+
+<nav id="tabbar" class="tabbar" hidden>
+  <a href="#/" data-tab="today"><span class="tab-ico">▲</span><span>Today</span></a>
+  <a href="#/history" data-tab="history"><span class="tab-ico">≡</span><span>History</span></a>
+  <a href="#/progress" data-tab="progress"><span class="tab-ico">◔</span><span>Progress</span></a>
+  <a href="#/settings" data-tab="settings"><span class="tab-ico">⚙</span><span>Settings</span></a>
+</nav>
+
+<div id="toast-host" class="toast-host" aria-live="polite"></div>
+<div id="sheet-host"></div>
+<div id="update-pill" class="update-pill" hidden></div>
+
+<script type="module" src="./src/main.js"></script>
+<noscript><p style="padding:2rem;color:#fff">This app needs JavaScript.</p></noscript>
+</body>
+</html>

@@ -1,0 +1,156 @@
+/* Reset, iOS quirk fixes and the layout shell. */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html {
+  /* Stops Safari inflating text in landscape. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
+body {
+  margin: 0;
+  /* Explicit, never transparent — the host paints its own ground behind us. */
+  background: var(--bg);
+  color: var(--ink);
+  font-family: var(--font);
+  font-size: var(--fs-md);
+  line-height: 1.45;
+  /* Kill rubber-band bounce; a single inner container does the scrolling. */
+  overscroll-behavior: none;
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+/* Long-pressing a button otherwise fires the iOS selection magnifier, which is a
+   real problem for the press-and-hold-to-accelerate stepper. */
+button, .btn, .tabbar a, .chip, .stepper {
+  -webkit-touch-callout: none;
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+h1, h2, h3, h4, p { margin: 0; }
+ul, ol { margin: 0; padding: 0; list-style: none; }
+a { color: inherit; text-decoration: none; }
+
+button {
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  cursor: pointer;
+  touch-action: manipulation; /* removes the 300ms double-tap delay */
+}
+
+/* iOS zooms the viewport on focus for anything under 16px and never fully zooms
+   back out. 16px minimum on every focusable input, no exceptions. */
+input, textarea, select {
+  font: inherit;
+  font-size: 16px;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  border-radius: var(--r-sm);
+  padding: var(--sp-3);
+  width: 100%;
+}
+input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+.num { font-variant-numeric: tabular-nums; font-feature-settings: 'tnum'; }
+
+/* ---- Shell ------------------------------------------------------------- */
+
+#app {
+  min-height: 100dvh;
+  padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom));
+}
+
+.screen {
+  padding: calc(var(--safe-top) + var(--sp-4)) max(var(--sp-4), var(--safe-left))
+           var(--sp-6) max(var(--sp-4), var(--safe-right));
+  max-width: 640px;
+  margin: 0 auto;
+}
+
+/* Sessions get a fixed action bar, so they need extra bottom clearance. */
+.screen--session { padding-bottom: calc(var(--tap) + var(--sp-6) * 2 + var(--safe-bottom)); }
+
+.boot {
+  display: grid;
+  place-content: center;
+  gap: var(--sp-2);
+  min-height: 100dvh;
+  text-align: center;
+}
+.boot-mark { font-size: var(--fs-sm); letter-spacing: 0.22em; color: var(--ink-3); }
+.boot-note { font-size: var(--fs-sm); color: var(--ink-4); }
+
+.page-head { margin-bottom: var(--sp-5); }
+.page-title { font-size: var(--fs-2xl); font-weight: 700; letter-spacing: -0.02em; }
+.page-sub { color: var(--ink-3); font-size: var(--fs-sm); margin-top: var(--sp-1); }
+
+.eyebrow {
+  font-size: var(--fs-xs);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+  font-weight: 600;
+}
+
+.stack { display: grid; gap: var(--sp-3); }
+.stack-lg { display: grid; gap: var(--sp-5); }
+.row { display: flex; align-items: center; gap: var(--sp-3); }
+.row-between { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
+.grow { flex: 1; min-width: 0; }
+.muted { color: var(--ink-3); }
+.dim { color: var(--ink-4); }
+.small { font-size: var(--fs-sm); }
+.xs { font-size: var(--fs-xs); }
+.center { text-align: center; }
+.truncate { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* Wide content must scroll inside its own container; the page body never
+   scrolls sideways. */
+.scroll-x { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+/* ---- Tab bar ------------------------------------------------------------ */
+
+.tabbar {
+  position: fixed;
+  inset: auto 0 0 0;
+  z-index: 30;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  background: color-mix(in srgb, var(--bg) 88%, transparent);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border-top: 1px solid var(--line);
+  padding-bottom: var(--safe-bottom);
+}
+.tabbar a {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: var(--sp-2) 0 var(--sp-3);
+  font-size: var(--fs-xs);
+  color: var(--ink-4);
+  min-height: var(--tabbar-h);
+}
+.tabbar a[aria-current='page'] { color: var(--ink); }
+.tab-ico { font-size: 1rem; line-height: 1.2; }
+
+/* Mid-workout the tab bar is both a distraction and a tap-target hazard: it
+   shares bottom:0 with the session action bar. Hide it while a session is live
+   and give the action bar the whole bottom edge. */
+body[data-session='active'] .tabbar { display: none; }
+body[data-session='active'] #app { padding-bottom: 0; }
+body[data-session='active'] .toast-host { bottom: calc(var(--tap) + 2rem + var(--safe-bottom)); }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}

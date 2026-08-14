@@ -1,0 +1,31 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - run: npm ci
+
+      # Fails if a file was added without being added to the service worker
+      # precache list — i.e. if the app would break offline.
+      - name: Check service worker precache list is current
+        run: npm run check:sw
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install WebKit for Playwright
+        run: npx playwright install --with-deps webkit
+
+      - name: End-to-end tests
+        run: npm run test:e2e

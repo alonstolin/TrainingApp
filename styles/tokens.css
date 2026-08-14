@@ -1,0 +1,78 @@
+/*
+ * Design tokens.
+ *
+ * Dark-only by deliberate choice: this app is used in gym lighting, on an OLED
+ * phone, often at night. A single committed palette is also one fewer surface to
+ * keep consistent. Backgrounds are painted explicitly — a transparent body would
+ * borrow the host's theme and could render dark text on dark ground.
+ */
+
+:root {
+  color-scheme: dark;
+
+  /* Ground */
+  --bg:            #0d0d0d;
+  --surface:       #1a1a19;
+  --surface-2:     #242422;
+  --surface-3:     #2f2f2c;
+  --line:          #2c2c2a;
+  --line-strong:   #3d3d39;
+
+  /* Ink */
+  --ink:           #ffffff;
+  --ink-2:         #c3c2b7;
+  --ink-3:         #898781;
+  --ink-4:         #605e58;
+
+  /* Series colours — fixed per lift, never assigned by list position, so a
+     filtered chart never silently recolours a line. All-pairs distinguishable
+     on this surface without relying on hue alone. */
+  --incline:       #3987e5;
+  --ohp:           #d95926;
+  --pullup:        #199e70;
+
+  --accent:        #3987e5;
+  --accent-ink:    #ffffff;
+  --good:          #199e70;
+  --warn:          #d99a26;
+  --bad:           #e5544b;
+  --deload:        #8b6fd4;
+
+  /* Type */
+  --font: -apple-system, BlinkMacSystemFont, 'SF Pro Text', system-ui, sans-serif;
+  --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+
+  --fs-xs:  0.6875rem;
+  --fs-sm:  0.8125rem;
+  --fs-md:  0.9375rem;
+  --fs-lg:  1.125rem;
+  --fs-xl:  1.5rem;
+  --fs-2xl: 2rem;
+  --fs-3xl: 2.75rem;
+
+  /* Space */
+  --sp-1: 0.25rem;
+  --sp-2: 0.5rem;
+  --sp-3: 0.75rem;
+  --sp-4: 1rem;
+  --sp-5: 1.5rem;
+  --sp-6: 2rem;
+
+  --r-sm: 8px;
+  --r-md: 12px;
+  --r-lg: 18px;
+  --r-full: 999px;
+
+  /* Sweaty thumbs are imprecise thumbs — 56px, comfortably above the 44pt floor. */
+  --tap: 56px;
+  --tap-sm: 44px;
+
+  /* Safe areas. Fall back to 0px so nothing collapses in a desktop browser. */
+  --safe-top:    env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left:   env(safe-area-inset-left, 0px);
+  --safe-right:  env(safe-area-inset-right, 0px);
+
+  --tabbar-h: 58px;
+  --shadow: 0 8px 28px rgba(0, 0, 0, 0.55);
+}
