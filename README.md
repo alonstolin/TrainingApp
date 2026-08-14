@@ -6,9 +6,11 @@ Built for one person: an experienced natural lifter (10+ years) who wants to add
 
 ---
 
+**Live at → https://alonstolin.github.io/TrainingApp/**
+
 ## Installing it on your phone
 
-1. Open the app URL in **Safari** (not Chrome — only Safari can install a web app on iOS).
+1. Open **https://alonstolin.github.io/TrainingApp/** in **Safari** (not Chrome — only Safari can install a web app on iOS).
 2. Tap **Share** → **Add to Home Screen**.
 3. Open it from the home screen icon, not from Safari.
 
@@ -122,8 +124,14 @@ npm run serve        # http://localhost:4173/TrainingApp/  ← same subpath as G
 npm run test:e2e     # Playwright, WebKit + iPhone emulation
 npm run build:sw     # regenerate the service worker precache list + version stamp
 npm run verify       # check:sw + unit tests
-node tools/shots.mjs # seed 6 weeks of data and screenshot every screen
+npm run verify:live  # smoke-test the DEPLOYED site (install reqs, SW scope, offline, logging)
+npm run shots        # seed 6 weeks of data and screenshot every screen
+npm run deploy       # build:sw + commit + push
 ```
+
+`verify:live` is the one that catches production-only failures — the `/TrainingApp/`
+subpath, real HTTPS, GitHub Pages cache headers, and the service worker registering
+under a scope it does not own by default. Run it after any deploy.
 
 **Run `npm run build:sw` before every push.** It regenerates the precache manifest and stamps a new cache version. Forgetting to add a new file to that list is the standard way a PWA boots to a blank screen offline, so the list is generated rather than hand-maintained, and CI fails if it drifts.
 

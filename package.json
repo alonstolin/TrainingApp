@@ -10,7 +10,10 @@
     "serve": "node tools/serve.mjs",
     "build:sw": "node tools/gen-sw-manifest.mjs",
     "check:sw": "node tools/gen-sw-manifest.mjs --check",
-    "verify": "npm run check:sw && npm test"
+    "verify": "npm run check:sw && npm test",
+    "verify:live": "node tools/verify-live.mjs",
+    "shots": "node tools/shots.mjs",
+    "deploy": "npm run build:sw && git add -A && git commit -m \"update\" && git push"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",
