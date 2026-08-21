@@ -19,7 +19,7 @@ import { DEFAULT_META, SCHEMA_VERSION } from '../core/schema.js';
 import { CURRENT_PROGRAM } from '../program/index.js';
 import { deriveCursors } from '../core/schedule.js';
 import { backoffLoad } from '../core/progression.js';
-import { getExercise } from '../program/exercises.js';
+import { getExercise, setIncrementOverrides } from '../program/exercises.js';
 
 const PERSIST_DEBOUNCE_MS = 250;
 
@@ -160,6 +160,10 @@ function touch(id) {
 
 export function setMeta(patch) {
   state.meta = { ...state.meta, ...patch };
+  // Increments feed the pure prescription layer through a module registry, so a
+  // change here has to be pushed across or the next session is resolved with the
+  // old step size.
+  if ('increments' in patch) setIncrementOverrides(state.meta.increments);
   metaDirty = true;
   schedulePersist();
   notify();
@@ -186,6 +190,10 @@ export async function init() {
     state.sessions = [];
     state.meta = { ...DEFAULT_META };
   }
+
+  // Custom increments are configuration for the pure prescription layer, so they
+  // have to be installed before anything resolves a session.
+  setIncrementOverrides(state.meta.increments);
 
   // First launch IS day one. Without this the drift calculation has no anchor
   // and the Today screen can never tell you that you are behind.

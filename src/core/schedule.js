@@ -27,6 +27,7 @@
 
 import { dayOfWeek, addDays, daysBetween, trainingDate } from './dates.js';
 import { resolveSession, weekModifier } from './prescribe.js';
+import { getExercise } from '../program/exercises.js';
 
 const LOOKBACK_CAP_DAYS = 60; // ceiling on the missed-slot walk
 
@@ -318,4 +319,129 @@ export function longestRecentRunKm(sessions, today = trainingDate(), days = 30) 
     if (km > best) best = km;
   }
   return best;
+}
+
+// ---------------------------------------------------------------------------
+// Muscle overlap
+// ---------------------------------------------------------------------------
+
+/**
+ * Muscles a lift day meaningfully trains, as muscle → set count.
+ *
+ * Counts SECONDARY involvement (see `trains` in exercises.js), because "did I
+ * already hammer this yesterday" has to know a pull-up loads biceps and an
+ * incline press loads triceps. Volume accounting deliberately does not — that
+ * wants one owner per set — so the two must not be conflated.
+ */
+export function muscleLoad(program, dayKey) {
+  const letter = dayKey.split(':')[1];
+  const day = program.liftDays?.[letter];
+  const out = {};
+  if (!day) return out;
+
+  for (const block of day.blocks) {
+    const sets = block.sets ?? (block.top?.sets ?? 0) + (block.backoff?.sets ?? 0);
+    for (const m of getExercise(block.exerciseId).trains ?? []) {
+      out[m] = (out[m] ?? 0) + sets;
+    }
+  }
+  return out;
+}
+
+/**
+ * Muscles trained hard enough on this day to matter for scheduling.
+ *
+ * The threshold exists so a single incidental set does not read as "trained".
+ * Three sets is the point where a muscle has had a real stimulus and will still
+ * be carrying fatigue the next day.
+ */
+export function musclesWorked(program, dayKey, { minSets = 3 } = {}) {
+  return new Set(
+    Object.entries(muscleLoad(program, dayKey))
+      .filter(([, sets]) => sets >= minSets)
+      .map(([m]) => m),
+  );
+}
+
+/**
+ * Muscles this day leans on hard enough that yesterday's fatigue would cost you
+ * something: anything loaded by a tiered main lift, plus anything carrying a
+ * genuinely high set count.
+ *
+ * This is what separates a warning worth reading from a nag. Three sets of face
+ * pulls the day after three sets of reverse pec deck is a rear-delt "overlap" on
+ * paper, but nothing is compromised by it — whereas a heavy top set on a
+ * pre-fatigued muscle is exactly the thing this program cannot afford. A guard
+ * that fires on the harmless case teaches you to dismiss it.
+ */
+export function significantMuscles(program, dayKey, { heavySets = 5 } = {}) {
+  const letter = dayKey.split(':')[1];
+  const day = program.liftDays?.[letter];
+  if (!day) return new Set();
+
+  const out = new Set();
+  for (const block of day.blocks) {
+    if (!block.tier) continue; // T1/T2 — the lifts the program is actually built on
+    for (const m of getExercise(block.exerciseId).trains ?? []) out.add(m);
+  }
+  for (const [m, sets] of Object.entries(muscleLoad(program, dayKey))) {
+    if (sets >= heavySets) out.add(m);
+  }
+  return out;
+}
+
+/** Muscles two lift days share at a meaningful dose. */
+export function sharedMuscles(program, dayA, dayB, opts) {
+  const a = musclesWorked(program, dayA, opts);
+  return [...musclesWorked(program, dayB, opts)].filter((m) => a.has(m)).sort();
+}
+
+/**
+ * Would training `candidateDayKey` now repeat muscles trained in the last day?
+ *
+ * The program template already spaces overlapping days apart, but the schedule
+ * is cursor-driven: fall behind and the app hands you the next session whenever
+ * you open it, which can compress a 48h gap into 24h. That is a scheduling
+ * accident, not a plan, so it is worth flagging rather than silently serving.
+ *
+ * Consecutive-day training is not itself harmful — a volume-matched RCT found
+ * 24h vs 48–72h recovery made no difference to strength or hypertrophy. The
+ * reason to care here is narrower: a heavy top set is worth less when the
+ * muscle is pre-fatigued, and the top sets are what drive this program's goals.
+ *
+ * @returns {{muscles:string[], since:object, hoursAgo:number, suggestion:string|null}|null}
+ */
+export function overlapWarning(sessions, program, candidateDayKey, opts = {}) {
+  const { withinHours = 20, now = Date.now(), minSets = 3 } = opts;
+  if (!candidateDayKey?.startsWith('lift:')) return null;
+
+  // Asymmetric on purpose: any real work yesterday leaves fatigue, but only work
+  // this session actually leans on is worth interrupting you about.
+  const candidate = significantMuscles(program, candidateDayKey);
+  if (candidate.size === 0) return null;
+
+  const recent = sessions
+    .filter((s) => s.kind === 'lift' && s.status === 'completed' && s.dayKey && s.completedAt)
+    .map((s) => ({ s, hoursAgo: (now - new Date(s.completedAt).getTime()) / 3_600_000 }))
+    .filter((r) => r.hoursAgo >= 0 && r.hoursAgo <= withinHours)
+    .sort((a, b) => a.hoursAgo - b.hoursAgo);
+
+  for (const { s, hoursAgo } of recent) {
+    if (s.dayKey === candidateDayKey) continue; // repeating a day is a choice, not an accident
+    const overlap = [...musclesWorked(program, s.dayKey, { minSets })].filter((m) =>
+      candidate.has(m),
+    );
+    if (overlap.length === 0) continue;
+
+    // Offer the nearest day in the cycle that collides with neither.
+    const yesterday = musclesWorked(program, s.dayKey, { minSets });
+    const suggestion =
+      program.liftCycle.find((k) => {
+        if (k === candidateDayKey || k === s.dayKey) return false;
+        return ![...significantMuscles(program, k)].some((m) => yesterday.has(m));
+      }) ?? null;
+
+    return { muscles: overlap.sort(), since: s, hoursAgo: Math.round(hoursAgo), suggestion };
+  }
+  return null;
 }

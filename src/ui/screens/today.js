@@ -6,7 +6,8 @@ import { toast } from '../toast.js';
 import { unlockAudio } from '../timer.js';
 import * as store from '../../data/store.js';
 import { CURRENT_PROGRAM } from '../../program/index.js';
-import { resolveToday, alternatives, longestRecentRunKm } from '../../core/schedule.js';
+import { MUSCLE_LABELS } from '../../program/exercises.js';
+import { resolveToday, alternatives, longestRecentRunKm, overlapWarning } from '../../core/schedule.js';
 import { checkRunSpike } from '../../core/progression.js';
 import { backupNudge } from '../../data/backup.js';
 import { trainingDate, formatRelativeDate, dayName } from '../../core/dates.js';
@@ -45,6 +46,19 @@ function skipCard(card, onDone) {
       { label: 'Cancel', variant: 'ghost' },
     ],
   });
+}
+
+/**
+ * Start a specific lift day now. Routes through `alternatives` rather than
+ * touching the cursor, so nothing is skipped or consumed — swapping the order
+ * of two sessions must not cost you one.
+ */
+function startSpecificDay(state, dayKey, onDone) {
+  const alt = alternatives(state, CURRENT_PROGRAM).find((a) => a.session.dayKey === dayKey);
+  if (!alt) return false;
+  onDone();
+  startAndGo(alt.session);
+  return true;
 }
 
 function chooseOther(state, onDone) {
@@ -272,6 +286,61 @@ export default function mountToday(root) {
     if (!today.resume && today.primary) {
       const card = today.primary;
       const group = el('div.stack', null, sessionCard(card, { hero: true }));
+
+      // Muscle-overlap guard. The template spaces overlapping days apart, but the
+      // schedule follows what you actually do — fall behind and a 48h gap can
+      // compress to 24h without anything looking wrong.
+      if (card.track === 'lift') {
+        const clash = overlapWarning(state.sessions, CURRENT_PROGRAM, card.session.dayKey);
+        if (clash) {
+          // Cap the list: naming six muscles reads as noise, and the point lands
+          // with two or three.
+          const names = clash.muscles.map((m) => (MUSCLE_LABELS[m] ?? m).toLowerCase());
+          const shown = names.slice(0, 3);
+          const list =
+            names.length > 3
+              ? `${shown.join(', ')} and more`
+              : shown.length > 1
+                ? `${shown.slice(0, -1).join(', ')} and ${shown.at(-1)}`
+                : shown[0];
+          // "yesterday" has to be true. A session finished this morning is not
+          // yesterday, and saying so undermines every other number in the app.
+          const when = clash.since.date === trainingDate() ? 'earlier today' : 'yesterday';
+          const swapTo = clash.suggestion ? CURRENT_PROGRAM.liftDays[clash.suggestion.split(':')[1]] : null;
+
+          const warnBlock = el('div.stack', { style: { gap: '0.5rem' } });
+          const banner = el(
+            'div.banner.banner--warn',
+            null,
+            el('span.grow.small', {
+              text: `You trained ${list} ${when} on ${
+                clash.since.prescriptionSnapshot?.name ?? 'your last session'
+              }. ${card.session.name} leans on the same muscles, so today's heavy work will be worth less.`,
+            }),
+          );
+          warnBlock.appendChild(banner);
+
+          if (swapTo) {
+            warnBlock.appendChild(
+              el(
+                'div.btn-row',
+                null,
+                onTap(
+                  el('button.btn.btn--sm', { type: 'button', text: `Do ${swapTo.name} instead` }),
+                  () => {
+                    if (!startSpecificDay(state, clash.suggestion, rerender)) {
+                      toast('Could not switch — pick one from “Something else”.');
+                    }
+                  },
+                ),
+              ),
+            );
+          }
+          // Above the card, not below it: a six-exercise card can push a warning
+          // off-screen entirely, and this one is meant to change what you do next.
+          group.insertBefore(warnBlock, group.firstChild);
+        }
+      }
 
       // Run spike guard.
       if (card.track === 'run' && card.session.target.km) {

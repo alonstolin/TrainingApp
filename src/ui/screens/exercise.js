@@ -3,7 +3,9 @@
 import { el, onTap, append, fmtSets, fmtWeight } from '../dom.js';
 import { lineChart } from '../chart.js';
 import * as store from '../../data/store.js';
-import { getExercise } from '../../program/exercises.js';
+import { getExercise, EXERCISES } from '../../program/exercises.js';
+import { stepper } from '../stepper.js';
+import { toast } from '../toast.js';
 import { e1rmSeries, topSetSeries, personalBests } from '../../core/stats.js';
 import { formatDate, formatRelativeDate } from '../../core/dates.js';
 import { navigate } from '../../router.js';
@@ -31,6 +33,48 @@ export default function mountExercise(root, params) {
         el('div.page-sub', { text: [ex.cue, ex.retired ? 'No longer in the program' : null].filter(Boolean).join(' · ') }),
       ),
     ]);
+
+    // ---- weight increment
+    // Gym stacks are not all 2.5kg. This drives the +/- step AND the rounding of
+    // every suggested load, so a machine that moves in 6.25kg steps stops being
+    // handed targets that do not exist on it.
+    if (ex.metric === 'weight_reps' && !ex.retired) {
+      const base = EXERCISES[ex.id]?.increment ?? 2.5;
+      const custom = store.getState().meta.increments?.[ex.id] ?? null;
+      const control = stepper({
+        value: custom ?? base,
+        step: 0.25,
+        min: 0.25,
+        max: 50,
+        label: 'step',
+        unit: ex.unit,
+        onChange: (v) => {
+          const next = { ...(store.getState().meta.increments ?? {}) };
+          if (v == null || v === base) delete next[ex.id];
+          else next[ex.id] = v;
+          store.setMeta({ increments: next });
+          toast(v == null || v === base ? 'Using the default step' : `Steps of ${v}${ex.unit}`);
+        },
+      });
+
+      append(screen, [
+        el(
+          'div.card',
+          { style: { marginBottom: '1.5rem' } },
+          el('div.row-between', null,
+            el('div.grow', null,
+              el('div.listitem-title', { text: 'Weight increment' }),
+              el('div.listitem-sub', {
+                text: custom
+                  ? `Custom — the default for this lift is ${base}${ex.unit}.`
+                  : 'Match this to the smallest jump your gym actually allows.',
+              }),
+            ),
+            el('div', { style: { width: '150px', flex: '0 0 auto' } }, control),
+          ),
+        ),
+      ]);
+    }
 
     if (!history.length) {
       append(screen, [el('div.empty', null, el('div.empty-mark', { text: '·' }), el('p', { text: 'Never logged.' }))]);

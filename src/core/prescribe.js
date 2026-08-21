@@ -66,8 +66,20 @@ export function resolveLiftSession(program, dayKey, weekInMeso, historyFor) {
     // under different schemes (heavy top-set day vs volume day), and comparing
     // across them is meaningless in both directions — "last time" has to mean
     // the last time you did this exercise in this role.
-    const last = historyFor?.(block.exerciseId, { dayKey }) ?? null;
-    const basis = historyFor?.(block.exerciseId, { dayKey, forProgression: true }) ?? last;
+    //
+    // `historyAliasDayKey` is the migration hatch for moving an exercise between
+    // days. Day-scoped lookups would otherwise orphan its history and silently
+    // restart it from nothing, which is the exact failure mode that once killed
+    // progression on every main lift. The alias is consulted ONLY when the
+    // primary lookup is empty, so it retires itself after one session on the
+    // new day.
+    const lookup = (opts) => {
+      const own = historyFor?.(block.exerciseId, { dayKey, ...opts }) ?? null;
+      if (own || !block.historyAliasDayKey) return own;
+      return historyFor?.(block.exerciseId, { dayKey: block.historyAliasDayKey, ...opts }) ?? null;
+    };
+    const last = lookup({});
+    const basis = lookup({ forProgression: true }) ?? last;
     const nSets = setCountFor(block, mod);
 
     if (block.scheme === 'top_backoff') {

@@ -13,7 +13,7 @@
  */
 
 // <<<GENERATED-VERSION-START>>>
-const VERSION = '2026.08.14-cc8cd4cc';
+const VERSION = '2026.08.21-c83e5dcd';
 // <<<GENERATED-VERSION-END>>>
 
 const CACHE = `training-${VERSION}`;
@@ -31,6 +31,7 @@ const PRECACHE = [
   './playwright.config.js',
   './src/core/calendar.js',
   './src/core/dates.js',
+  './src/core/geo.js',
   './src/core/ids.js',
   './src/core/prescribe.js',
   './src/core/progression.js',
@@ -47,6 +48,7 @@ const PRECACHE = [
   './src/router.js',
   './src/ui/chart.js',
   './src/ui/dom.js',
+  './src/ui/runtracker.js',
   './src/ui/screens/calendar.js',
   './src/ui/screens/exercise.js',
   './src/ui/screens/history.js',

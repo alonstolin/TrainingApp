@@ -16,7 +16,7 @@
 
 export default {
   programId: 'strength-hypertrophy-10k',
-  version: 1,
+  version: 2,
   name: 'Strength · Shoulders & Arms · 10K',
 
   mesocycleWeeks: 5,
@@ -63,15 +63,30 @@ export default {
   liftDays: {
     B: {
       key: 'lift:B',
-      name: 'Lower',
+      name: 'Lower + Pull Volume',
       short: 'Lower',
-      focus: 'Legs — kept productive, not maximal. Running is also leg work.',
+      focus: 'Legs, plus the pull-up volume exposure and curls. Neither interferes with legs.',
       blocks: [
         { exerciseId: 'back-squat', scheme: 'double_progression', sets: 3, repMin: 5, repMax: 8, rpeCap: 8, restSec: 180 },
         { exerciseId: 'rdl', scheme: 'double_progression', sets: 3, repMin: 8, repMax: 10, rpeCap: 8, restSec: 150 },
         { exerciseId: 'leg-press', scheme: 'double_progression', sets: 3, repMin: 10, repMax: 12, rpeCap: 9, restSec: 120 },
         { exerciseId: 'leg-curl', scheme: 'double_progression', sets: 3, repMin: 10, repMax: 15, rpeCap: 9, restSec: 90 },
-        { exerciseId: 'calf-raise', scheme: 'double_progression', sets: 3, repMin: 10, repMax: 15, rpeCap: 9, restSec: 75 },
+        // Trimmed 3→2 to make room for the upper work without a 21-set session.
+        { exerciseId: 'calf-raise', scheme: 'double_progression', sets: 2, repMin: 10, repMax: 15, rpeCap: 9, restSec: 75 },
+        // Pull volume lives HERE, not on the Shoulders & Arms day. It is the only
+        // slot in the cycle that neighbours nothing else pulling: Lower follows
+        // Shoulders & Arms (no back work) and precedes Upper Push (no back work),
+        // so the heavy pull-up on day C is never within 24h of its volume day.
+        {
+          exerciseId: 'weighted-pullup', scheme: 'double_progression', tier: 'T2',
+          sets: 3, repMin: 6, repMax: 8, rpeCap: 7.5, restSec: 150,
+          historyAliasDayKey: 'lift:D',
+        },
+        {
+          exerciseId: 'bayesian-curl', scheme: 'double_progression',
+          sets: 3, repMin: 10, repMax: 12, rpeCap: 9, restSec: 90, ramp: true,
+          historyAliasDayKey: 'lift:D',
+        },
       ],
     },
 
@@ -98,7 +113,7 @@ export default {
       key: 'lift:C',
       name: 'Upper Pull',
       short: 'Pull',
-      focus: 'Weighted pull-up HEAVY · incline volume',
+      focus: 'Weighted pull-up HEAVY · back and biceps, all in one day',
       blocks: [
         {
           exerciseId: 'weighted-pullup', scheme: 'top_backoff', tier: 'T1',
@@ -106,12 +121,11 @@ export default {
           backoff: { sets: 3, reps: 6, pctOfTop: 0.85 },
           restSec: 210,
         },
-        // Second BARBELL incline exposure, not a dumbbell variation. Incline bench
-        // is a named strength goal, so it gets the same true heavy/volume DUP
-        // treatment as OHP and the weighted pull-up — specificity to the lift you
-        // are actually trying to add weight to.
-        { exerciseId: 'incline-bench', scheme: 'double_progression', tier: 'T2', sets: 3, repMin: 8, repMax: 12, rpeCap: 8, restSec: 150 },
         { exerciseId: 'chest-supported-row', scheme: 'double_progression', sets: 3, repMin: 8, repMax: 12, rpeCap: 9, restSec: 120 },
+        // Replaces the incline volume that used to sit here. A second vertical
+        // pull keeps back volume where the pulling day is, and it does not put
+        // chest work next to the Shoulders & Arms day.
+        { exerciseId: 'lat-pulldown', scheme: 'double_progression', sets: 3, repMin: 10, repMax: 12, rpeCap: 9, restSec: 120 },
         { exerciseId: 'reverse-pec-deck', scheme: 'double_progression', sets: 3, repMin: 12, repMax: 15, rpeCap: 9, restSec: 75, ramp: true },
         { exerciseId: 'incline-db-curl', scheme: 'double_progression', sets: 3, repMin: 8, repMax: 12, rpeCap: 9, restSec: 90, ramp: true },
         { exerciseId: 'preacher-curl', scheme: 'double_progression', sets: 2, repMin: 10, repMax: 12, rpeCap: 9, restSec: 90, ramp: true },
@@ -122,7 +136,7 @@ export default {
       key: 'lift:D',
       name: 'Shoulders & Arms',
       short: 'Delts',
-      focus: 'OHP HEAVY · pull-up volume · priority delt + arm block',
+      focus: 'OHP HEAVY · incline volume · priority delt + triceps block',
       blocks: [
         {
           exerciseId: 'ohp', scheme: 'top_backoff', tier: 'T1',
@@ -130,12 +144,19 @@ export default {
           backoff: { sets: 3, reps: 6, pctOfTop: 0.85 },
           restSec: 210,
         },
-        { exerciseId: 'weighted-pullup', scheme: 'double_progression', tier: 'T2', sets: 3, repMin: 6, repMax: 8, rpeCap: 7.5, restSec: 150 },
+        // Second BARBELL incline exposure, moved here from the Pull day. Incline
+        // bench is a named strength goal so it keeps a true heavy/volume DUP
+        // split; sitting here rather than on Pull is what removes the back-to-back
+        // chest work AND the back-to-back pull-up work in one move.
+        {
+          exerciseId: 'incline-bench', scheme: 'double_progression', tier: 'T2',
+          sets: 3, repMin: 8, repMax: 12, rpeCap: 8, restSec: 150,
+          historyAliasDayKey: 'lift:C',
+        },
         { exerciseId: 'cable-lateral-raise', scheme: 'double_progression', sets: 3, repMin: 12, repMax: 15, rpeCap: 9, restSec: 75, ramp: true },
         { exerciseId: 'machine-lateral-raise', scheme: 'double_progression', sets: 2, repMin: 15, repMax: 20, rpeCap: 10, restSec: 60, ramp: true },
         { exerciseId: 'face-pull', scheme: 'double_progression', sets: 3, repMin: 15, repMax: 20, rpeCap: 9, restSec: 60, ramp: true },
         { exerciseId: 'ez-overhead-tricep', scheme: 'double_progression', sets: 3, repMin: 10, repMax: 12, rpeCap: 9, restSec: 90, ramp: true },
-        { exerciseId: 'bayesian-curl', scheme: 'double_progression', sets: 3, repMin: 10, repMax: 12, rpeCap: 9, restSec: 90, ramp: true },
       ],
     },
 

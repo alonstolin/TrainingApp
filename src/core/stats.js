@@ -76,10 +76,18 @@ export function topSetSeries(sessions, exerciseId, opts = {}) {
   return out;
 }
 
-/** One point per completed run. */
-export function runSeries(sessions) {
+/**
+ * One point per completed run.
+ *
+ * `variant` filters to 'easy' or 'long'. Charting both together is the same
+ * mistake as charting heavy and volume lift exposures on one line: easy runs are
+ * short and quick, long runs are long and slow, so a combined series zigzags
+ * between two unrelated things and hides the trend inside each.
+ */
+export function runSeries(sessions, { variant } = {}) {
   return completed(sessions)
     .filter((s) => s.kind === 'run' && s.run?.distanceKm)
+    .filter((s) => !variant || s.variant === variant)
     .map((s) => ({
       date: s.date,
       km: s.run.distanceKm,
@@ -87,6 +95,7 @@ export function runSeries(sessions) {
       pace: paceSecPerKm(s.run.distanceKm, s.run.durationSec),
       variant: s.variant,
       effort: s.run.effort ?? null,
+      hasTrack: (s.run.track?.length ?? 0) > 1,
       sessionId: s.id,
     }));
 }

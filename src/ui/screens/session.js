@@ -15,6 +15,8 @@
 import { el, onTap, append, clear, fmtWeight, fmtSets, scrollTop } from '../dom.js';
 import { stepper, rpeRow, repRow } from '../stepper.js';
 import { startRest, stopRest, renderRest, holdTimer, keepAwake, unlockAudio } from '../timer.js';
+import { runTracker, trackShape, geoSupported } from '../runtracker.js';
+import { downsample } from '../../core/geo.js';
 import { openSheet, confirmSheet } from '../sheet.js';
 import { toast, undoToast } from '../toast.js';
 import * as store from '../../data/store.js';
@@ -273,6 +275,7 @@ function mountLift(screen, session, ctx) {
       const weightStepper = stepper({
         value: current.weightKg,
         step: ex.increment,
+        unit: ex.unit,
         min: isBw ? -60 : 0,
         label: isBw ? 'added kg' : 'kg',
         onChange: (v) => {
@@ -406,7 +409,70 @@ function mountRun(screen, session, ctx) {
     durationSec: session.run?.durationSec ?? (snap.target?.minutes ? snap.target.minutes * 60 : null),
     effort: session.run?.effort ?? null,
     notes: session.run?.notes ?? '',
+    track: session.run?.track ?? null,
   };
+
+  // null → not chosen yet, 'gps' | 'timer' | 'manual'
+  let mode = draft.track?.length ? 'gps' : null;
+  let tracker = null;
+
+  const stopTracker = () => {
+    tracker?.stop?.();
+    tracker = null;
+  };
+  ctx.onTeardown?.(stopTracker);
+
+  /** Track live, time it, or just type the numbers in. */
+  function modeBlock() {
+    if (mode === 'gps' && draft.track?.length && !tracker) {
+      // Already tracked — show the traced route rather than the controls.
+      return el(
+        'div.card',
+        null,
+        el('div.eyebrow', { text: 'Tracked route' }),
+        trackShape(draft.track),
+        el('p.xs.dim', { text: `${draft.track.length} GPS points recorded.` }),
+      );
+    }
+
+    if (mode === 'gps' || mode === 'timer') {
+      stopTracker();
+      tracker = runTracker({
+        useGps: mode === 'gps',
+        onFinish: ({ seconds, km, track }) => {
+          if (seconds > 0) draft.durationSec = seconds;
+          if (km) draft.distanceKm = km;
+          if (track?.length > 1) draft.track = downsample(track, { minMeters: 10 });
+          mode = km ? 'gps' : 'manual';
+          save();
+          render();
+        },
+      });
+      return tracker;
+    }
+
+    return el(
+      'div.btn-row',
+      null,
+      geoSupported()
+        ? onTap(el('button.btn.btn--primary', { type: 'button', text: 'Track with GPS' }), () => {
+            mode = 'gps';
+            render();
+          })
+        : null,
+      onTap(el('button.btn', { type: 'button', text: 'Stopwatch' }), () => {
+        mode = 'timer';
+        render();
+      }),
+    );
+  }
+
+  /** Persist the draft without completing, so a mid-run kill loses nothing. */
+  function save() {
+    store.updateSession(session.id, (s) => {
+      s.run = { ...(s.run ?? {}), ...draft };
+    });
+  }
 
   const render = () => {
     clear(screen);
@@ -489,6 +555,8 @@ function mountRun(screen, session, ctx) {
           snap.note ? el('p.small', { text: snap.note, style: { marginTop: '0.4rem', color: 'var(--warn)' } }) : null,
         ),
 
+        modeBlock(),
+
         el('div', null, el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'Distance'), distStep),
         el(
           'div',
@@ -516,6 +584,7 @@ function mountRun(screen, session, ctx) {
       toast('Distance and time are both needed to log a run');
       return;
     }
+    stopTracker();
     store.updateSession(session.id, (s) => {
       s.run = { ...draft };
     });
@@ -706,6 +775,9 @@ function renderCompleted(screen, session) {
 
   if (session.kind === 'run' && session.run) {
     const p = paceSecPerKm(session.run.distanceKm, session.run.durationSec);
+    if (session.run.track?.length > 1) {
+      append(screen, [el('div.card', null, el('div.eyebrow', { text: 'Route' }), trackShape(session.run.track))]);
+    }
     body.appendChild(
       el(
         'div.statgrid',
@@ -788,7 +860,11 @@ export default function mountSession(root, params) {
   // Hides the tab bar for the duration; see base.css. Both it and the action bar
   // live at bottom:0, and the tab bar would otherwise swallow taps on "Log set".
   document.body.dataset.session = 'active';
-  const ctx = { onDone: () => navigate('/') };
+  // Teardown hooks let a screen release things the router cannot see — a GPS
+  // watch and its wake lock would otherwise keep running after you navigate away
+  // mid-run, draining the battery with nothing on screen to show for it.
+  const teardown = [];
+  const ctx = { onDone: () => navigate('/'), onTeardown: (fn) => teardown.push(fn) };
 
   const render =
     session.kind === 'lift'
@@ -802,6 +878,13 @@ export default function mountSession(root, params) {
 
   return {
     unmount() {
+      for (const fn of teardown) {
+        try {
+          fn();
+        } catch (e) {
+          console.error('teardown failed', e);
+        }
+      }
       releaseWake();
       delete document.body.dataset.session;
       store.flush().catch(() => {});

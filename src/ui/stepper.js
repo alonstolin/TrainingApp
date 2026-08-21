@@ -12,6 +12,66 @@
  */
 
 import { el, onTap, onHold, fmtWeight } from './dom.js';
+import { openSheet } from './sheet.js';
+
+/** Two decimals is the finest granularity any gym equipment actually offers. */
+const round2 = (n) => Math.round(n * 100) / 100;
+
+/**
+ * Numeric entry for a value the +/- grid cannot reach.
+ *
+ * `inputmode="decimal"` rather than `type="number"`: iOS gives a proper decimal
+ * keypad, and a text input never silently discards a partially-typed value the
+ * way a number input does.
+ */
+function keypadSheet({ label, value, unit, onSubmit }) {
+  const input = el('input.numfield.num', {
+    type: 'text',
+    inputmode: 'decimal',
+    autocomplete: 'off',
+    autocorrect: 'off',
+    spellcheck: 'false',
+    value: value == null ? '' : String(value),
+    'aria-label': label || 'Value',
+  });
+
+  const commit = () => {
+    const raw = input.value.trim().replace(',', '.');
+    if (raw === '') return onSubmit(null);
+    const parsed = Number(raw);
+    if (Number.isFinite(parsed)) onSubmit(parsed);
+  };
+
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      commit();
+      close();
+    }
+  });
+
+  const close = openSheet({
+    title: label || 'Enter a value',
+    subtitle: 'Any value goes in exactly as typed — 6.25 stays 6.25.',
+    content: el(
+      'label.numfield-wrap',
+      null,
+      input,
+      unit ? el('span.numfield-unit', { text: unit }) : null,
+    ),
+    actions: [
+      { label: 'Set', onSelect: commit },
+      { label: 'Cancel', variant: 'ghost' },
+    ],
+  });
+
+  // The tap that opened the sheet is still the active gesture, so iOS allows
+  // focus here and the keypad comes up without a second tap.
+  requestAnimationFrame(() => {
+    input.focus();
+    input.select?.();
+  });
+}
 
 /**
  * @param {object} o
@@ -38,9 +98,13 @@ export function stepper(o) {
   const set = (next, silent = false) => {
     if (next == null) value = null;
     else {
-      // Round to the step grid so repeated +/- can never drift to 72.49999.
-      const snapped = Math.round(next / step) * step;
-      value = Math.min(max, Math.max(min, Math.round(snapped * 1000) / 1000));
+      // Deliberately NOT snapped to the step grid. Snapping used to apply to
+      // typed input too, so entering 6.25 on a 2.5 stepper silently became 7.5
+      // (round(6.25/2.5)=3, 3*2.5=7.5) — the app quietly logging a weight you
+      // did not lift. Rounding to 2dp is enough to stop float drift, and +/-
+      // now moves BY the step from wherever you are: 6.25 → 8.75, keeping the
+      // offset instead of collapsing it.
+      value = Math.min(max, Math.max(min, round2(next)));
     }
     num.textContent = value == null ? placeholder : format(value);
     if (!silent) onChange?.(value);
@@ -55,12 +119,9 @@ export function stepper(o) {
 
   const valueBox = el('div.stepper-value', null, num, lab);
   if (allowKeypad) {
-    onTap(valueBox, () => {
-      const raw = window.prompt(`${label || 'Value'}:`, value == null ? '' : String(value));
-      if (raw == null) return;
-      const parsed = Number(raw.replace(',', '.'));
-      if (Number.isFinite(parsed)) set(parsed);
-    });
+    onTap(valueBox, () =>
+      keypadSheet({ label, value, unit: o.unit ?? '', onSubmit: (v) => set(v) }),
+    );
   }
 
   const root = el(`div.stepper${small ? '.stepper--sm' : ''}`, null, minus, valueBox, plus);

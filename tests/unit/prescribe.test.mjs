@@ -55,16 +55,23 @@ test('each main lift gets one heavy and one volume exposure per week', () => {
 
 test('the second incline exposure is the barbell lift itself, not a variation', () => {
   // Incline bench is a named strength goal, so exposure #2 has to be specific to
-  // the lift we are adding weight to.
-  const c = resolveLiftSession(program, 'lift:C', 1, noHistory);
-  const incline = c.entries.find((e) => e.exerciseId === 'incline-bench');
-  assert.ok(incline, 'Upper Pull should carry the incline volume exposure');
+  // the lift we are adding weight to. It lives on Shoulders & Arms rather than
+  // Upper Pull so that chest work never lands on two adjacent days.
+  const d = resolveLiftSession(program, 'lift:D', 1, noHistory);
+  const incline = d.entries.find((e) => e.exerciseId === 'incline-bench');
+  assert.ok(incline, 'Shoulders & Arms should carry the incline volume exposure');
   assert.equal(incline.scheme, 'double_progression');
+
+  const c = resolveLiftSession(program, 'lift:C', 1, noHistory);
+  assert.ok(
+    !c.entries.some((e) => e.exerciseId === 'incline-bench'),
+    'Upper Pull must not press — it neighbours the Shoulders & Arms day',
+  );
 });
 
 test('heavy and volume exposures of the same lift do not read each other', () => {
   // THE bug this guards, and it is a silent killer: incline bench is heavy
-  // (top set + back-offs) on Upper Push and volume (3x8-12) on Upper Pull. If
+  // (top set + back-offs) on Upper Push and volume (3x8-12) on Shoulders & Arms. If
   // "last time" just returns the most recent session containing the exercise,
   // the heavy day frequently gets handed the volume day's sets, finds no set of
   // type 'top', concludes it has never been done, and restarts from nothing.
@@ -78,7 +85,7 @@ test('heavy and volume exposures of the same lift do not read each other', () =>
   };
   const volumeDay = {
     date: '2026-08-07', // more recent
-    dayKey: 'lift:C',
+    dayKey: 'lift:D',
     sets: [mkSet({ weightKg: 70, reps: 12, rpe: 7, type: 'work' })],
     bodyweightKg: 80,
   };
@@ -95,8 +102,8 @@ test('heavy and volume exposures of the same lift do not read each other', () =>
   assert.equal(top.type, 'top');
   assert.equal(top.weightKg, 102.5, 'heavy day must build on the last HEAVY session, not the volume one');
 
-  const pull = resolveLiftSession(program, 'lift:C', 1, lookup);
-  const volume = setsOf(pull, 'incline-bench')[0];
+  const delts = resolveLiftSession(program, 'lift:D', 1, lookup);
+  const volume = setsOf(delts, 'incline-bench')[0];
   assert.equal(volume.weightKg, 72.5, 'volume day must build on the last VOLUME session, not the heavy one');
 });
 
@@ -107,8 +114,18 @@ test('prescribe scopes its history lookups to the current day', () => {
     return null;
   });
   assert.ok(seen.length > 0);
+
+  // Every lookup must be day-scoped. The only dayKey other than the current one
+  // that may appear is a migration alias the block explicitly declares.
+  const aliases = new Set(
+    program.liftDays.D.blocks.map((b) => b.historyAliasDayKey).filter(Boolean),
+  );
   for (const s of seen) {
-    assert.equal(s.dayKey, 'lift:D', `${s.id} was looked up without a day scope`);
+    assert.ok(s.dayKey, `${s.id} was looked up without any day scope`);
+    assert.ok(
+      s.dayKey === 'lift:D' || aliases.has(s.dayKey),
+      `${s.id} was looked up under an undeclared day scope ${s.dayKey}`,
+    );
   }
 });
 

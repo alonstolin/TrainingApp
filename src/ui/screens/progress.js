@@ -212,8 +212,10 @@ function runningTab(sessions) {
     return wrap;
   }
 
-  // Two stacked charts sharing an x-axis — NEVER a dual y-axis, which would
-  // manufacture an apparent relationship between distance and pace.
+  // Never a dual y-axis, and never two different KINDS of run on one line.
+  // Easy runs are short and quick, long runs are long and slow; combined, the
+  // series just alternates between them and the trend inside each is invisible.
+  // Splitting them is the same fix already applied to heavy vs volume lifts.
   const weekly = weeklyRunVolume(sessions);
   append(wrap, [
     el(
@@ -226,35 +228,62 @@ function runningTab(sessions) {
         unit: 'km',
         formatValue: (v) => String(Math.round(v * 10) / 10),
       }),
-    ),
-    el(
-      'div.chart-card',
-      null,
-      el('div.chart-title', { text: 'Pace' }),
-      lineChart({
-        points: runs.filter((r) => r.pace).map((r) => ({
-          date: r.date,
-          value: r.pace,
-          detail: `${r.km}km${r.variant ? ` · ${r.variant}` : ''}`,
-        })),
-        color: 'var(--incline)',
-        unit: '',
-        formatValue: (v) => formatPace(v).replace(' /km', ''),
-      }),
-      el('p.xs.dim', { style: { marginTop: '0.5rem' }, text: 'Lower is faster. Expect this to drift UP as long runs get longer — that is correct, not a regression.' }),
-    ),
-    el(
-      'div.chart-card',
-      null,
-      el('div.chart-title', { text: 'Distance per run' }),
-      lineChart({
-        points: runs.map((r) => ({ date: r.date, value: r.km, detail: r.variant ?? '' })),
-        color: 'var(--pullup)',
-        unit: 'km',
-        zeroBase: true,
-      }),
+      el('p.xs.dim', { style: { marginTop: '0.5rem' }, text: 'Everything you ran, easy and long together. Total load is the one place adding them up is the right thing to do.' }),
     ),
   ]);
+
+  const paceCard = el('div.chart-card', null, el('div.chart-title', { text: 'Pace' }));
+  for (const [variant, label, color] of [
+    ['easy', 'Easy runs', 'var(--incline)'],
+    ['long', 'Long runs', 'var(--ohp)'],
+  ]) {
+    const pts = runSeries(sessions, { variant }).filter((r) => r.pace);
+    paceCard.appendChild(
+      el('div.chart-series-label', null,
+        el('span.chart-dot', { style: { background: color } }),
+        el('span', { text: label }),
+        el('span.dim.xs', { text: pts.length ? `${pts.length} run${pts.length === 1 ? '' : 's'}` : '' }),
+      ),
+    );
+    paceCard.appendChild(
+      pts.length > 1
+        ? lineChart({
+            points: pts.map((r) => ({ date: r.date, value: r.pace, detail: `${r.km}km` })),
+            color,
+            unit: '',
+            formatValue: (v) => formatPace(v).replace(' /km', ''),
+          })
+        : el('p.xs.dim', {
+            style: { margin: '0 0 0.75rem' },
+            text: pts.length === 1 ? 'One logged — a trend needs at least two.' : 'None logged yet.',
+          }),
+    );
+  }
+  paceCard.appendChild(
+    el('p.xs.dim', { style: { marginTop: '0.5rem' }, text: 'Lower is faster. Each kind of run is tracked on its own, so a slow long run no longer drags the easy-run trend down with it.' }),
+  );
+  append(wrap, [paceCard]);
+
+  // The long run IS the ramp toward 10K; easy-run distance is deliberately flat,
+  // so plotting it here would add noise and no signal. Weekly bars above already
+  // account for the total.
+  const longs = runSeries(sessions, { variant: 'long' });
+  if (longs.length > 1) {
+    append(wrap, [
+      el(
+        'div.chart-card',
+        null,
+        el('div.chart-title', { text: 'Long run distance' }),
+        lineChart({
+          points: longs.map((r) => ({ date: r.date, value: r.km, detail: formatPace(r.pace) })),
+          color: 'var(--pullup)',
+          unit: 'km',
+          zeroBase: true,
+        }),
+        el('p.xs.dim', { style: { marginTop: '0.5rem' }, text: `The ramp that gets you to ${goal}km. Down weeks are meant to dip.` }),
+      ),
+    ]);
+  }
 
   return wrap;
 }

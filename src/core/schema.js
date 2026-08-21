@@ -11,6 +11,8 @@ export const SCHEMA_VERSION = 1;
 export const BACKUP_FORMAT = 'trainingapp-backup';
 
 export const DEFAULT_META = {
+  /** exerciseId → weight increment, for gyms whose stacks are not 2.5kg. */
+  increments: {},
   schemaVersion: SCHEMA_VERSION,
   startDate: null,
   bodyweightKg: null,
@@ -56,6 +58,17 @@ export function validateSession(s, label = 'session') {
   if (s.entries != null && !Array.isArray(s.entries)) errs.push(`${label}: entries must be an array`);
   if (s.kind === 'run' && s.status === 'completed' && !s.run) {
     errs.push(`${label}: completed run has no run data`);
+  }
+  // A GPS track is optional, but a malformed one must not reach the renderer —
+  // projectTrack would produce NaN coordinates and the SVG would vanish silently.
+  if (s.run?.track != null) {
+    if (!Array.isArray(s.run.track)) {
+      errs.push(`${label}: run.track must be an array`);
+    } else if (
+      s.run.track.some((p) => !Number.isFinite(p?.lat) || !Number.isFinite(p?.lon))
+    ) {
+      errs.push(`${label}: run.track contains a point without usable coordinates`);
+    }
   }
   return errs;
 }

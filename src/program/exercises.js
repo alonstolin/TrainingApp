@@ -29,7 +29,12 @@ const def = (id, name, o = {}) => ({
   unit: o.unit ?? 'kg',
   increment: o.increment ?? 2.5,
   loadModel: o.loadModel ?? 'external',
-  muscle: o.muscle ?? null, // drives the weekly-volume readout
+  muscle: o.muscle ?? null, // primary — drives the weekly-volume readout
+  // Every muscle this meaningfully loads, primary AND significant secondary.
+  // Separate from `muscle` on purpose: volume accounting wants one owner per set,
+  // but "did I already train this yesterday" has to see that a pull-up hits
+  // biceps and an incline press hits triceps. Defaults to the primary alone.
+  trains: o.trains ?? (o.muscle ? [o.muscle] : []),
   perSide: o.perSide ?? false,
   cue: o.cue ?? '',
   retired: false,
@@ -42,18 +47,21 @@ export const EXERCISES = Object.fromEntries(
       short: 'Incline Bench',
       role: 'main',
       muscle: 'chest',
+      trains: ['chest', 'front-delts', 'triceps'],
       cue: '~30° bench. Touch upper chest, elbows ~45–60°.',
     }),
     def('ohp', 'Standing Barbell Overhead Press', {
       short: 'OHP',
       role: 'main',
       muscle: 'front-delts',
+      trains: ['front-delts', 'side-delts', 'triceps'],
       cue: 'Glutes + abs braced. Head through at lockout.',
     }),
     def('weighted-pullup', 'Weighted Pull-Up', {
       short: 'Wtd Pull-Up',
       role: 'main',
       muscle: 'back',
+      trains: ['back', 'biceps'],
       increment: 1.25,
       loadModel: 'bodyweight_plus',
       cue: 'Full hang each rep. Chest to bar. Log ADDED weight only.',
@@ -63,6 +71,7 @@ export const EXERCISES = Object.fromEntries(
     def('incline-db-press', 'Incline Dumbbell Press', {
       short: 'Incline DB',
       muscle: 'chest',
+      trains: ['chest', 'front-delts', 'triceps'],
       increment: 2,
       cue: 'Second incline exposure of the week — keep it submaximal.',
     }),
@@ -101,11 +110,13 @@ export const EXERCISES = Object.fromEntries(
     def('chest-supported-row', 'Chest-Supported Row', {
       short: 'CS Row',
       muscle: 'back',
+      trains: ['back', 'biceps', 'rear-delts'],
       cue: 'Chest stays down. No body English — that is the point of the pad.',
     }),
     def('lat-pulldown', 'Lat Pulldown', {
       short: 'Pulldown',
       muscle: 'back',
+      trains: ['back', 'biceps'],
       cue: 'Full stretch at the top, no leaning back past ~15°.',
     }),
     def('reverse-pec-deck', 'Reverse Pec Deck', {
@@ -142,17 +153,20 @@ export const EXERCISES = Object.fromEntries(
       short: 'Squat',
       role: 'secondary',
       muscle: 'quads',
+      trains: ['quads', 'glutes'],
       cue: 'Leave 2–3 reps in reserve. This is not the lift we are peaking.',
     }),
     def('rdl', 'Romanian Deadlift', {
       short: 'RDL',
       role: 'secondary',
       muscle: 'hamstrings',
+      trains: ['hamstrings', 'glutes'],
       cue: 'Hinge, soft knees, stop where the hamstring stretch runs out.',
     }),
     def('leg-press', 'Leg Press / Bulgarian Split Squat', {
       short: 'Leg Press',
       muscle: 'quads',
+      trains: ['quads', 'glutes'],
       increment: 5,
     }),
     def('leg-curl', 'Seated Leg Curl', { short: 'Leg Curl', muscle: 'hamstrings' }),
@@ -228,8 +242,34 @@ export const EXERCISES = Object.fromEntries(
   ].map((e) => [e.id, e]),
 );
 
+/**
+ * Per-exercise weight increment overrides, e.g. a cable stack that moves in
+ * 6.25kg steps rather than 2.5kg.
+ *
+ * A module-level registry rather than a parameter threaded through every
+ * signature: it is configuration, set once from stored meta at boot, and
+ * plumbing it through prescribe/progression would touch a dozen call sites to
+ * express one setting. Tests must reset it — see `setIncrementOverrides({})`.
+ *
+ * It matters beyond the +/- button size: `roundToIncrement` uses it to snap
+ * SUGGESTED loads, so without it the app keeps proposing weights that do not
+ * exist on the machine in front of you.
+ */
+let INCREMENT_OVERRIDES = {};
+
+export function setIncrementOverrides(map) {
+  INCREMENT_OVERRIDES = map && typeof map === 'object' ? { ...map } : {};
+}
+
+export function getIncrementOverrides() {
+  return { ...INCREMENT_OVERRIDES };
+}
+
 /** Safe lookup — returns a placeholder rather than throwing, so old logs always render. */
 export function getExercise(id) {
+  const override = INCREMENT_OVERRIDES[id];
+  const base = EXERCISES[id];
+  if (base) return override ? { ...base, increment: override } : base;
   return (
     EXERCISES[id] ?? {
       id,
@@ -242,6 +282,7 @@ export function getExercise(id) {
       increment: 2.5,
       loadModel: 'external',
       muscle: null,
+      trains: [],
       perSide: false,
       cue: '',
       retired: true,
@@ -260,6 +301,7 @@ export const MUSCLE_LABELS = {
   biceps: 'Biceps',
   chest: 'Chest',
   back: 'Back',
+  glutes: 'Glutes',
   quads: 'Quads',
   hamstrings: 'Hamstrings',
   calves: 'Calves',
