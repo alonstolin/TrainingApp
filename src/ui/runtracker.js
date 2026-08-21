@@ -16,7 +16,7 @@
 import { el, onTap } from './dom.js';
 import { keepAwake } from './timer.js';
 import { formatDuration } from '../core/dates.js';
-import { acceptPoint, trackDistanceKm, recentPace, projectTrack } from '../core/geo.js';
+import { createTrackBuilder, recentPace, projectTrack } from '../core/geo.js';
 import { formatPace } from '../core/progression.js';
 
 export const geoSupported = () => typeof navigator !== 'undefined' && 'geolocation' in navigator;
@@ -64,7 +64,9 @@ export function runTracker({ useGps = false, onFinish }) {
   let ticker = null;
   let watchId = null;
   let wake = null;
-  const track = [];
+  // The builder owns smoothing and distance; `track` is its smoothed output.
+  const builder = createTrackBuilder();
+  const track = builder.points;
   let status = useGps ? 'GPS: waiting for a fix…' : '';
 
   const face = el('div.bigtimer-face.num', { text: '0:00' });
@@ -79,7 +81,7 @@ export function runTracker({ useGps = false, onFinish }) {
   const paint = () => {
     face.textContent = formatDuration(elapsed());
     if (useGps) {
-      const km = trackDistanceKm(track);
+      const km = builder.km;
       distEl.textContent = km ? km.toFixed(2) : '—';
       const rp = recentPace(track);
       paceEl.textContent = rp ? formatPace(rp).replace(' /km', '') : '—';
@@ -103,13 +105,10 @@ export function runTracker({ useGps = false, onFinish }) {
       t: pos.timestamp ?? Date.now(),
       acc: pos.coords.accuracy ?? null,
     };
-    const prev = track[track.length - 1] ?? null;
-    const { accept, reason } = acceptPoint(prev, fix);
-    if (accept) {
-      track.push(fix);
+    const { accepted, reason } = builder.push(fix);
+    if (accepted) {
       status = `GPS: tracking · ±${Math.round(fix.acc ?? 0)}m`;
-      if (track.length === 1) renderShape();
-      else if (track.length % 5 === 0) renderShape();
+      if (track.length === 1 || track.length % 5 === 0) renderShape();
     } else if (reason === 'inaccurate') {
       status = `GPS: weak signal (±${Math.round(fix.acc ?? 0)}m) — not recording`;
     }
@@ -183,7 +182,7 @@ export function runTracker({ useGps = false, onFinish }) {
     endWatch();
     wake?.();
     wake = null;
-    onFinish({ seconds, km: useGps ? trackDistanceKm(track) : null, track: track.slice() });
+    onFinish({ seconds, km: useGps ? builder.km : null, track: track.slice() });
   });
 
   const root = el(

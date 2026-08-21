@@ -188,12 +188,49 @@ The run logger offers three ways to fill itself in:
   tiles, so it costs no network and works offline like everything else.
 - **By hand** — the steppers, as before.
 
-Two things worth knowing. **iOS suspends web apps when the screen locks**, so GPS
-records nothing while the phone is off; the app holds a wake lock whenever it is
-visible, and says so on screen rather than pretending otherwise. And phone GPS
-wanders when you stand still — `src/core/geo.js` drops fixes worse than 25m,
-movements under 5m, and anything implying a speed above 12 m/s, because unfiltered
-jitter inflates a 40-minute run by 10–15% and takes the pace with it.
+**iOS suspends web apps when the screen locks**, so GPS records nothing while the
+phone is off. The app holds a wake lock whenever it is visible, and says so on
+screen rather than pretending otherwise.
+
+### Why the distance filtering is not trivial
+
+A phone reports a position with a few metres of error, and that error *wanders*.
+Sum the raw fixes and you measure the jagged path the receiver reported, not the
+smooth one you ran — and a jagged line is longer. Standing at a crossing is worse
+still: true distance zero, reported distance whatever the drift adds up to.
+
+`tests/unit/geo-accuracy.test.mjs` simulates 8km runs over known paths with
+autocorrelated GPS error and asserts the recorded distance. Measured error against
+truth, averaged over 8 seeds:
+
+| | raw sum | fixed 5m gate | shipped filter |
+|---|---|---|---|
+| open sky | +9% | +4% | **+1%** |
+| partial obstruction | +20% | +9% | **+1%** |
+| urban canyon | +63% | +41% | **+3%** |
+| 400m track, urban | +60% | +38% | **−3%** |
+
+The middle column is a cautionary tale, not a strawman — it is what this app
+shipped first. A fixed 5m "minimum movement" gate sounds reasonable until you
+notice that at 1Hz and 3.4 m/s a real stride is only ~3.4m per fix, *below* the
+gate. It discarded genuine movement and kept only fixes that noise had pushed
+further, selecting for the very thing it was meant to remove.
+
+What works instead, in `src/core/geo.js`:
+
+1. **Adaptive smoothing** — an exponential filter whose strength is set by the
+   receiver's own reported accuracy. Clean fixes are barely touched; ragged ones
+   are heavily averaged.
+2. **Anchor gate** — distance is committed only once you are convincingly clear of
+   the last committed point, scaled to that accuracy.
+3. **Segment speed** — crossing that gate takes a runner ~2s and a phone on a
+   bench ~30s, which separates travel from drift. Without it, five stationary
+   minutes invent 50–130m.
+
+Smoothing alone is not enough, which is why the track case is in the table: over-
+smooth and you cut every corner, turning inflation into *under*-reporting. That
+would be the worse bug — it makes you look slower than you were and compounds
+into the 10K ramp — so a test asserts the error is not biased downward.
 
 There is deliberately **no map and no route planning**. That was considered and
 dropped in favour of tracking; adding a tile layer later touches none of this.

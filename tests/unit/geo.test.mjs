@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   haversineMeters, acceptPoint, buildTrack, trackDistanceKm,
   downsample, projectTrack, recentPace, DEFAULTS,
+  createTrackBuilder, smoothingAlpha,
 } from '../../src/core/geo.js';
 
 const near = (actual, expected, tol, msg) =>
@@ -52,17 +53,23 @@ test('a poor-accuracy fix is discarded', () => {
   assert.equal(r.reason, 'inaccurate');
 });
 
-test('standing still does not accumulate distance', () => {
-  // THE failure this exists to stop. A stationary phone wanders a couple of
-  // metres per fix; unfiltered, that is counted as running and a 40-minute run
-  // comes back 10-15% long with a pace to match.
+test('standing still accumulates essentially nothing', () => {
+  // A stationary phone reports a slowly wandering position. Unfiltered, every
+  // wander counts as distance run.
   const fixes = [];
-  for (let i = 0; i < 200; i++) {
-    fixes.push(at(51.5 + (Math.sin(i) * 2e-5), -0.12 + (Math.cos(i) * 2e-5), i * 1000, 8));
+  for (let i = 0; i < 300; i++) {
+    fixes.push(at(51.5 + Math.sin(i / 7) * 3e-5, -0.12 + Math.cos(i / 5) * 3e-5, i * 1000, 8));
   }
-  const { km, rejected } = buildTrack(fixes);
-  assert.equal(km, 0, 'a phone on a bench has run nowhere');
-  assert.ok(rejected > 150, `most fixes should be rejected, got ${rejected}`);
+  const { km } = buildTrack(fixes);
+  assert.ok(km <= 0.05, `five minutes on a bench invented ${km}km`);
+});
+
+test('genuine slow movement is still counted', () => {
+  // The stationary guard must not swallow a walk. 1.2 m/s for 200s = ~240m.
+  const fixes = [];
+  for (let i = 0; i < 200; i++) fixes.push(at(51.5 + i * (1.2 / 111_195), -0.12, i * 1000, 6));
+  const { km } = buildTrack(fixes);
+  near(km * 1000, 240, 30, 'a walk is travel, not drift');
 });
 
 test('a GPS teleport is rejected rather than added', () => {
@@ -75,6 +82,15 @@ test('genuine running movement is kept', () => {
   const r = acceptPoint(at(51.5, -0.12, 0), at(51.5003, -0.12, 12_000));
   assert.equal(r.accept, true);
   near(r.meters, 33, 3, 'about 33m in 12s ≈ 6:00/km');
+});
+
+test('a real stride is never rejected as noise', () => {
+  // The regression this guards. At 1Hz and ~3.4 m/s a stride is ~3.4m per fix.
+  // A fixed 5m "minimum movement" gate is ABOVE that, so it threw away genuine
+  // movement and kept only fixes that noise had pushed further — selecting for
+  // noise, and over-reporting an 8km urban run as 11.3km.
+  const r = acceptPoint(at(51.5, -0.12, 0), at(51.5 + 3.4 / 111_195, -0.12, 1000, 6));
+  assert.equal(r.accept, true, 'one second of running must survive the filter');
 });
 
 test('the first fix is always accepted', () => {
@@ -104,9 +120,30 @@ test('an empty or single-fix track is handled without special-casing by callers'
 });
 
 test('DEFAULTS can be overridden per call', () => {
-  const tight = acceptPoint(at(51.5, -0.12, 0), at(51.5, -0.12, 1000, 30), { maxAccuracyM: 50 });
-  assert.equal(tight.reason, 'jitter', 'accuracy now passes, so it falls through to the move gate');
+  assert.equal(acceptPoint(at(51.5, -0.12, 0), at(51.5, -0.12, 1000, 30)).reason, 'inaccurate');
+  assert.equal(
+    acceptPoint(at(51.5, -0.12, 0), at(51.5, -0.12, 1000, 30), { maxAccuracyM: 50 }).accept,
+    true,
+    'a looser accuracy bar lets it through',
+  );
   assert.equal(DEFAULTS.maxAccuracyM, 25, 'defaults themselves are not mutated');
+});
+
+test('smoothing strength tracks reported accuracy', () => {
+  // A clean fix is barely touched; a ragged one is heavily averaged.
+  assert.ok(smoothingAlpha(4) > smoothingAlpha(12));
+  assert.ok(smoothingAlpha(12) > smoothingAlpha(25));
+  assert.equal(smoothingAlpha(1), DEFAULTS.maxAlpha, 'clamped at the top');
+  assert.equal(smoothingAlpha(1000), DEFAULTS.minAlpha, 'clamped at the bottom');
+  assert.ok(smoothingAlpha(undefined) > 0, 'a missing accuracy still yields something usable');
+});
+
+test('the streaming builder and the batch form agree exactly', () => {
+  const fixes = [];
+  for (let i = 0; i < 400; i++) fixes.push(at(51.5 + i * 3e-5, -0.12, i * 1000, 6));
+  const b = createTrackBuilder();
+  for (const f of fixes) b.push(f);
+  assert.equal(b.km, buildTrack(fixes).km, 'live tracking must not disagree with a recomputation');
 });
 
 // ---------------------------------------------------------------------------
