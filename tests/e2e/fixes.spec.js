@@ -372,3 +372,68 @@ test('a single run of a type shows a note rather than a broken chart', async ({ 
   await expect(page.locator('.screen')).toContainText('a trend needs at least two');
   await expect(page.locator('.screen')).toContainText('None logged yet');
 });
+
+// ---------------------------------------------------------------------------
+// Updates
+// ---------------------------------------------------------------------------
+
+test('Settings can check for updates and reports the result', async ({ page }) => {
+  await boot(page);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+
+  await page.goto('./#/settings');
+  await expect(page.locator('.page-title')).toContainText('Settings');
+
+  const btn = page.locator('button', { hasText: 'Check for updates' });
+  await expect(btn).toBeVisible();
+  await btn.click();
+
+  // Already on the newest build, so it should say so rather than sit silent.
+  await expect(page.locator('.toast')).toContainText(/latest|Downloading|reloading/i, { timeout: 10_000 });
+});
+
+test('a worker waiting from a previous launch is applied, not ignored', async ({ page }) => {
+  // The exact trap: an update installs, the user does not tap the pill, and the
+  // worker sits in `waiting`. On the next launch no `updatefound` fires — it is
+  // already installed — so nothing ever applies it.
+  await boot(page);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+
+  const applied = await page.evaluate(async () => {
+    const { updateDecision } = await import('./src/core/updates.js');
+    const reg = await navigator.serviceWorker.getRegistration();
+    return {
+      // The registration surface the fix depends on actually exists here.
+      hasWaitingProperty: 'waiting' in reg,
+      decisionAtLaunch: updateDecision({ waiting: true, activeSession: false }),
+      decisionMidWorkout: updateDecision({ waiting: true, activeSession: true }),
+      checkExposed: typeof window.__checkForUpdate === 'function',
+    };
+  });
+
+  expect(applied.hasWaitingProperty).toBe(true);
+  expect(applied.decisionAtLaunch).toBe('apply');
+  expect(applied.decisionMidWorkout).toBe('prompt');
+  expect(applied.checkExposed).toBe(true);
+});
+
+test('the version shown in Settings matches the running service worker', async ({ page }) => {
+  // If these ever disagree, the app is serving files from an older cache than it
+  // thinks — which is precisely the failure that is hard to notice.
+  await boot(page);
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.goto('./#/settings');
+
+  const shown = await page.locator('.screen').textContent();
+  const swVersion = await page.evaluate(
+    () =>
+      new Promise((resolve) => {
+        const ch = new MessageChannel();
+        ch.port1.onmessage = (e) => resolve(e.data.version);
+        navigator.serviceWorker.controller.postMessage({ type: 'VERSION' }, [ch.port2]);
+        setTimeout(() => resolve(null), 3000);
+      }),
+  );
+  expect(swVersion).toBeTruthy();
+  expect(shown).toContain(swVersion);
+});

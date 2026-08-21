@@ -13,7 +13,7 @@
  */
 
 // <<<GENERATED-VERSION-START>>>
-const VERSION = '2026.08.21-e1459aef';
+const VERSION = '2026.08.21-fe7d4205';
 // <<<GENERATED-VERSION-END>>>
 
 const CACHE = `training-${VERSION}`;
@@ -38,6 +38,7 @@ const PRECACHE = [
   './src/core/schedule.js',
   './src/core/schema.js',
   './src/core/stats.js',
+  './src/core/updates.js',
   './src/data/backup.js',
   './src/data/db.js',
   './src/data/store.js',

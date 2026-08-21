@@ -16,6 +16,24 @@ Built for one person: an experienced natural lifter (10+ years) who wants to add
 
 That last step matters. A home-screen web app gets its own storage, is exempt from Safari's 7-day eviction rule for unused sites, and runs full screen without browser chrome. It also works with no signal at all once installed — everything is cached on the device.
 
+### Updating
+
+Normally automatic: on launch, a downloaded update is applied and the app reloads
+before you have touched anything. Mid-workout it waits and offers a pill instead,
+since reloading would discard the set being entered.
+
+If it seems stuck, **Settings → Maintenance → Check for updates** tells you what
+version you are on and pulls a new one. **Force update** below it is the blunt
+instrument — it unregisters the worker and clears every cache. Neither touches
+logged training data, which lives in IndexedDB, not the cache.
+
+A trap worth recording, because it strands the app on an old build with no visible
+symptom: a service worker that installs and then sits in `waiting` does **not**
+fire `updatefound` on subsequent launches — it already installed. If the only code
+path that applies an update hangs off that event, the update never lands and the
+old version serves indefinitely. `registerSW()` therefore checks `reg.waiting`
+explicitly at startup, not just `updatefound`.
+
 **Your data lives only on this phone.** There is no server and no account. Deleting the home screen icon deletes every session you have logged, silently and unrecoverably. Use **Settings → Export backup** regularly; the app nags you after 14 days or 10 sessions.
 
 ---
@@ -261,7 +279,7 @@ under a scope it does not own by default. Run it after any deploy.
 index.html  manifest.webmanifest  sw.js  .nojekyll
 src/
   core/      ← STRICTLY DOM-FREE. All the hard logic. Unit-tested in Node.
-             dates · schedule · prescribe · progression · stats · schema · calendar · geo
+             dates · schedule · prescribe · progression · stats · schema · calendar · geo · updates
   data/      db (IndexedDB) · store (in-memory + indexes) · backup
   program/   exercises.js · program.v1.js   ← the program, as data
   ui/        dom · chart · stepper · timer · sheet · toast · runtracker + screens/

@@ -213,6 +213,25 @@ export default function mountSettings(root) {
         'div.stack',
         null,
         el('div.section-label', { text: 'Maintenance' }),
+        onTap(
+          el('button.btn.btn--block', { type: 'button', text: 'Check for updates' }),
+          async (ev) => {
+            const btn = ev.currentTarget;
+            btn.textContent = 'Checking…';
+            btn.setAttribute('disabled', 'true');
+            try {
+              const result = await window.__checkForUpdate?.();
+              if (result === 'updating') toast('Update found — reloading…', { kind: 'good' });
+              else if (result === 'downloading') toast('Downloading an update…');
+              else if (result === 'current') toast(`You're on the latest (${APP_VERSION})`, { kind: 'good' });
+              else toast('Updates are unavailable in this browser');
+            } catch {
+              toast('Could not reach the server — try again on a connection');
+            }
+            btn.textContent = 'Check for updates';
+            btn.removeAttribute('disabled');
+          },
+        ),
         onTap(el('button.btn.btn--ghost.btn--block', { type: 'button', text: 'Force update' }), () =>
           confirmSheet({
             title: 'Force update?',

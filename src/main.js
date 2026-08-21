@@ -5,6 +5,7 @@ import { start, register, navigate } from './router.js';
 import { attachTimerLifecycle } from './ui/timer.js';
 import { el, onTap, clear } from './ui/dom.js';
 import { APP_VERSION } from './version.js';
+import { updateDecision } from './core/updates.js';
 
 import mountToday from './ui/screens/today.js';
 import mountCalendar from './ui/screens/calendar.js';
@@ -24,10 +25,6 @@ function showUpdatePill(worker) {
   const pill = document.getElementById('update-pill');
   if (!pill) return;
 
-  // Never interrupt a workout. Reloading mid-session would lose the set the user
-  // is part-way through entering; the update can wait until next launch.
-  if (store.activeSession()) return;
-
   clear(pill);
   pill.hidden = false;
   pill.appendChild(el('span', { text: 'Update ready' }));
@@ -40,6 +37,14 @@ function showUpdatePill(worker) {
       },
     ),
   );
+}
+
+/** Apply a waiting worker, or surface it if a workout is in progress. */
+function handleWaiting(worker) {
+  if (!worker) return;
+  const decision = updateDecision({ waiting: true, activeSession: !!store.activeSession() });
+  if (decision === 'apply') worker.postMessage({ type: 'SKIP_WAITING' });
+  else if (decision === 'prompt') showUpdatePill(worker);
 }
 
 async function registerSW() {
@@ -60,17 +65,27 @@ async function registerSW() {
       updateViaCache: 'none',
     });
 
-    reg.addEventListener('updatefound', () => {
-      const worker = reg.installing;
+    const watch = (worker) => {
       if (!worker) return;
       worker.addEventListener('statechange', () => {
-        // A worker reaching 'installed' WITH an existing controller means this is
-        // an update, not a first install.
         if (worker.state === 'installed' && navigator.serviceWorker.controller) {
-          showUpdatePill(worker);
+          handleWaiting(worker);
         }
       });
-    });
+    };
+
+    // A worker ALREADY waiting from a previous launch. This is the case that
+    // stranded the app on an old build: `updatefound` does not fire for it —
+    // there is nothing new to install, it installed last time and has been
+    // sitting in `waiting` ever since. Without this check nothing ever applied
+    // it, so the update pill never appeared again and the old version served
+    // indefinitely.
+    if (reg.waiting) handleWaiting(reg.waiting);
+    // And one that is mid-install right now: `updatefound` may already have
+    // fired while we were awaiting register().
+    watch(reg.installing);
+
+    reg.addEventListener('updatefound', () => watch(reg.installing));
 
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       // Skip the first-install claim; only reload for a real update.
@@ -82,25 +97,32 @@ async function registerSW() {
     });
 
     // iOS PWAs stay resident for days; without an explicit poke the browser's own
-    // update check may effectively never fire. Throttled to once an hour.
-    let lastCheck = 0;
+    // update check may effectively never fire.
+    let lastCheck = Date.now();
     const maybeUpdate = () => {
       if (document.hidden) return;
-      const now = Date.now();
-      if (now - lastCheck < 3600_000) return;
-      lastCheck = now;
+      // Re-evaluate anything already waiting — a workout may have finished since.
+      if (reg.waiting) handleWaiting(reg.waiting);
+      if (Date.now() - lastCheck < 900_000) return;
+      lastCheck = Date.now();
       reg.update().catch(() => {});
     };
-    maybeUpdate();
     document.addEventListener('visibilitychange', maybeUpdate);
+
+    // Expose a manual check for Settings, so "am I on the latest?" is answerable
+    // without clearing caches and hoping.
+    window.__checkForUpdate = async () => {
+      await reg.update();
+      if (reg.waiting) {
+        handleWaiting(reg.waiting);
+        return 'updating';
+      }
+      return reg.installing ? 'downloading' : 'current';
+    };
   } catch (e) {
     console.warn('service worker registration failed', e);
   }
 }
-
-// ---------------------------------------------------------------------------
-// Boot
-// ---------------------------------------------------------------------------
 
 async function boot() {
   const root = document.getElementById('app');
