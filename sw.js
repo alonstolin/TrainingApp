@@ -13,7 +13,7 @@
  */
 
 // <<<GENERATED-VERSION-START>>>
-const VERSION = '2026.08.21-fe7d4205';
+const VERSION = '2026.09.19-96b78f36';
 // <<<GENERATED-VERSION-END>>>
 
 const CACHE = `training-${VERSION}`;
@@ -28,7 +28,6 @@ const PRECACHE = [
   './assets/icons/icon-512.png',
   './index.html',
   './manifest.webmanifest',
-  './playwright.config.js',
   './src/core/calendar.js',
   './src/core/dates.js',
   './src/core/geo.js',

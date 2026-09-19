@@ -18,9 +18,9 @@ import { fileURLToPath } from 'node:url';
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const CHECK = process.argv.includes('--check');
 
-const EXCLUDE_DIRS = new Set(['node_modules', 'tests', 'tools', '.git', '.github', 'test-results', 'playwright-report']);
+const EXCLUDE_DIRS = new Set(['node_modules', 'tests', 'tools', 'research', '.git', '.github', 'test-results', 'playwright-report']);
 const INCLUDE_EXT = new Set(['.html', '.js', '.css', '.webmanifest', '.png', '.svg', '.ico']);
-const EXCLUDE_FILES = new Set(['sw.js', 'package.json', 'package-lock.json']);
+const EXCLUDE_FILES = new Set(['sw.js', 'package.json', 'package-lock.json', 'playwright.config.js']);
 
 function walk(dir, out = []) {
   for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
