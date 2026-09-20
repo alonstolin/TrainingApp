@@ -23,6 +23,7 @@ npm run check:sw                           # fail if that list is stale (CI runs
 npm run verify                             # check:sw + unit
 npm run verify:live                        # smoke-test the DEPLOYED site in an iPhone browser
 npm run shots                              # seed 6 weeks of data, screenshot every screen (SHOT_DIR=… to redirect)
+npm run review -- coach/data/backups/x.json   # coaching report from a backup → coach/reports/ (or /review)
 ```
 
 **Run `npm run build:sw` before every commit that adds, removes or edits a served file.** The service worker precaches from a generated list; a file missing from it makes the app boot to a blank screen offline. `check:sw` catches drift and CI fails on it. `npm run deploy` does build:sw + commit + push.
@@ -63,6 +64,10 @@ Everything hard lives here — schedule, prescription, progression, stats, calen
 ### Storage
 
 IndexedDB, one record per session, all loaded into memory at boot (`src/data/store.js`). Every UI read is a synchronous lookup. Writes are debounced but serialised through a single chain so `await flush()` waits for everything in flight — `pagehide` is the only unload event iOS reliably fires, and it tears the page down immediately after. Backup is JSON export/import; there is no server and no account.
+
+### The coaching loop
+
+`coach/` is the review side of the app: `tools/review.mjs` turns a backup JSON into a Markdown report by running the same `src/core/` modules the app runs and applying the synthesis's rules; `coach/DECISIONS.md` (committed) is the dated log of program decisions; `coach/data/` and `coach/reports/` are gitignored because the repo is public. The `/review` skill (`.claude/skills/review/SKILL.md`) drives it. A program change found in review still goes through the Opus reviewer agent before `src/program/` changes. `tests/unit/review.test.mjs` simulates six weeks of v3 and checks the report end to end.
 
 ### Maps and routes
 

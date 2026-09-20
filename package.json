@@ -13,6 +13,7 @@
     "verify": "npm run check:sw && npm test",
     "verify:live": "node tools/verify-live.mjs",
     "shots": "node tools/shots.mjs",
+    "review": "node tools/review.mjs",
     "deploy": "npm run build:sw && git add -A && git commit -m \"update\" && git push"
   },
   "devDependencies": {

@@ -250,6 +250,19 @@ every tile you view in its own bucket (600 tiles, oldest out first), so the
 routes you actually run stay viewable offline; a tile never seen is a grey
 square with the route still drawn on it.
 
+## Reviewing the log
+
+The app logs; `coach/` is where the log gets read. Export a backup from the
+phone into `coach/data/backups/`, then `npm run review -- <file>` (or `/review`
+in Claude Code) writes a Markdown report to `coach/reports/`: adherence, the
+block reference after every heavy session, accessory stalls per gym and
+station, every run against the spike and weekly rails, CR10 and talk test by
+weekday, bodyweight drift, the reactive-deload conditions — and the program's
+own rules applied to them mechanically. Every number comes from the same
+`src/core/` modules the app runs. `coach/DECISIONS.md` is the dated record of
+what was changed and why. Training data and reports are gitignored; the repo
+is public.
+
 ## Running: stopwatch and GPS
 
 The run logger offers three ways to fill itself in:
