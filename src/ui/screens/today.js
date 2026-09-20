@@ -386,6 +386,19 @@ export default function mountToday(root) {
       const card = today.primary;
       const group = el('div.stack', null, sessionCard(card, { hero: true }));
 
+      // Which gym? Only asked when there is a choice. Changing it re-resolves
+      // the card: cable and machine loads, and any standing swaps, are per gym.
+      const gyms = state.meta.gyms ?? [];
+      if (card.track === 'lift' && gyms.length > 1) {
+        const chips = el('div.chips', { dataset: { gymPicker: '' } });
+        for (const g of gyms) {
+          const b = el('button.chip', { type: 'button', text: g.name, 'aria-pressed': String(state.meta.lastGymId === g.id) });
+          onTap(b, () => store.setMeta({ lastGymId: g.id }));
+          chips.appendChild(b);
+        }
+        group.appendChild(el('div', null, el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'Training at'), chips));
+      }
+
       // Muscle-overlap guard. The template spaces overlapping days apart, but the
       // schedule follows what you actually do — fall behind and a 48h gap can
       // compress to 24h without anything looking wrong.

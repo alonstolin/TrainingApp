@@ -74,6 +74,48 @@ function keypadSheet({ label, value, unit, onSubmit }) {
 }
 
 /**
+ * A one-line text entry in a sheet — gym names, station tags, route names.
+ * The only place the app opens the full keyboard, and always on purpose.
+ */
+export function textSheet({ title, subtitle, value = '', placeholder = '', submitLabel = 'Save', onSubmit }) {
+  const input = el('input.numfield', {
+    type: 'text',
+    autocomplete: 'off',
+    autocorrect: 'off',
+    autocapitalize: 'words',
+    spellcheck: 'false',
+    value,
+    placeholder,
+    'aria-label': title,
+  });
+  const commit = () => {
+    const v = input.value.trim();
+    if (v) onSubmit(v);
+  };
+  input.addEventListener('keydown', (ev) => {
+    if (ev.key === 'Enter') {
+      ev.preventDefault();
+      commit();
+      close();
+    }
+  });
+  const close = openSheet({
+    title,
+    subtitle,
+    content: el('label.numfield-wrap', null, input),
+    actions: [
+      { label: submitLabel, onSelect: commit },
+      { label: 'Cancel', variant: 'ghost' },
+    ],
+  });
+  requestAnimationFrame(() => {
+    input.focus();
+    input.select?.();
+  });
+  return close;
+}
+
+/**
  * @param {object} o
  *  value, step, min, max, label, format, onChange, small, allowKeypad
  */

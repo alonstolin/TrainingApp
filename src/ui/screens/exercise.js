@@ -13,14 +13,24 @@ import { navigate } from '../../router.js';
 export default function mountExercise(root, params) {
   const screen = el('div.screen');
   root.appendChild(screen);
+  let gymFilter = null; // gymId, for stack/machine exercises trained in more than one gym
 
   const render = () => {
-    const { sessions } = store.getState();
+    const state = store.getState();
     const ex = getExercise(params.id);
+
+    // A cable stack's 40 is not another gym's 40, so a gym-specific exercise
+    // is charted per gym — one series, never two gyms on one line.
+    const allRows = state.index.get(ex.id) ?? [];
+    const gymIds = ex.gymSpecific ? [...new Set(allRows.map((r) => r.gymId).filter((g) => g != null))] : [];
+    if (gymIds.length > 1 && (gymFilter == null || !gymIds.includes(gymFilter))) {
+      gymFilter = gymIds.includes(state.meta.lastGymId) ? state.meta.lastGymId : gymIds[0];
+    }
+    const sessions = gymIds.length > 1 ? state.sessions.filter((x) => x.gymId === gymFilter) : state.sessions;
     const e1 = e1rmSeries(sessions, ex.id);
     const top = topSetSeries(sessions, ex.id);
     const pb = personalBests(sessions, ex.id);
-    const history = store.historyFor(ex.id, 25);
+    const history = (gymIds.length > 1 ? allRows.filter((r) => r.gymId === gymFilter) : allRows).slice(0, 25);
 
     screen.textContent = '';
 
@@ -76,6 +86,19 @@ export default function mountExercise(root, params) {
       ]);
     }
 
+    if (gymIds.length > 1) {
+      const chips = el('div.chips', { style: { marginBottom: '1.25rem' }, dataset: { gymFilter: '' } });
+      for (const id of gymIds) {
+        const b = el('button.chip', { type: 'button', text: store.gymName(id), 'aria-pressed': String(id === gymFilter) });
+        onTap(b, () => {
+          gymFilter = id;
+          render();
+        });
+        chips.appendChild(b);
+      }
+      append(screen, [chips]);
+    }
+
     if (!history.length) {
       append(screen, [el('div.empty', null, el('div.empty-mark', { text: '·' }), el('p', { text: 'Never logged.' }))]);
       return;
@@ -129,7 +152,7 @@ export default function mountExercise(root, params) {
           el(
             'button.listitem',
             { type: 'button' },
-            el('span.grow', null, el('div.listitem-title.num', { text: fmtSets(h.sets, { max: 8 }) }), el('div.listitem-sub', { text: formatRelativeDate(h.date) })),
+            el('span.grow', null, el('div.listitem-title.num', { text: fmtSets(h.sets, { max: 8 }) }), el('div.listitem-sub', { text: formatRelativeDate(h.date) + (h.station ? ` · ${h.station}` : '') })),
             el('span.xs.dim', { text: formatDate(h.date) }),
           ),
           () => navigate(`/session/${h.sessionId}`),

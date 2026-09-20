@@ -46,6 +46,7 @@ Everything hard lives here — schedule, prescription, progression, stats, calen
 - **Core is attached at resolution** to the days in `program.core.attachTo` as entries with `group: 'core'`; `coreCompleted` counts any completed session with logged core work (`hasCoreWork`). The lift logger is metric-aware per entry (`weight_reps` | `reps` | `time` | `weight_time`); there is no separate core logger.
 - **`resolveBlock()`** resolves one block and is what `store.reresolveEntry` uses for substitutions and station changes — keep it the only place a block becomes planned sets.
 - **`sessionIntegrity()`** (`core/schema.js`) is read-only and strict only against the program version the session ran under.
+- **Gym scoping** lives in `makeHistoryLookup`: for `gymSpecific` exercises (cable/machine/smith) the lookup runs exact station → same gym → anywhere and labels the hit `scope`. Sessions carry `gymId`, entries carry `station` and `swappedFrom`; `meta.substitutions[gymId]` are standing swaps applied in `resolveLiftSession`. Never chart two gyms on one line (the exercise screen filters per gym).
 
 ### The schedule is cursor-driven, not calendar-driven
 

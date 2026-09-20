@@ -555,13 +555,74 @@ export function addEntry(sessionId, exerciseId, { sets = 3, repMin = 8, repMax =
   });
 }
 
-/** Change which gym an in-progress session is at; remembered for next time. */
+/**
+ * Change which gym an in-progress session is at; remembered for next time.
+ * Entries nothing has been logged on are re-resolved against the new gym's
+ * history (and its standing substitutions) — a cable number from the other
+ * gym must not sit there as a target.
+ */
 export function setSessionGym(sessionId, gymId) {
   const r = updateSession(sessionId, (s) => {
     s.gymId = gymId ?? null;
   });
   setMeta({ lastGymId: gymId ?? null });
+  const s = getSession(sessionId);
+  if (s?.status === 'in_progress' && s.kind === 'lift') {
+    const subs = gymId != null ? (state.meta.substitutions?.[gymId] ?? {}) : {};
+    for (const entry of [...s.entries]) {
+      if (entry.sets.some((x) => x.done) || entry.added) continue;
+      const original = entry.swappedFrom ?? entry.exerciseId;
+      reresolveEntry(sessionId, entry.entryId, { exerciseId: subs[original] ?? original, station: null });
+    }
+  }
   return r;
+}
+
+// ---------------------------------------------------------------------------
+// Gyms
+// ---------------------------------------------------------------------------
+
+export function addGym(name) {
+  const gym = { id: newId('gym'), name: String(name).trim() };
+  const gyms = [...(state.meta.gyms ?? []), gym];
+  setMeta({ gyms, lastGymId: state.meta.lastGymId ?? gym.id });
+  return gym;
+}
+
+export function renameGym(id, name) {
+  setMeta({ gyms: (state.meta.gyms ?? []).map((g) => (g.id === id ? { ...g, name: String(name).trim() } : g)) });
+}
+
+/** Sessions keep their gymId — history is never rewritten; the label falls back. */
+export function removeGym(id) {
+  const gyms = (state.meta.gyms ?? []).filter((g) => g.id !== id);
+  const subs = { ...(state.meta.substitutions ?? {}) };
+  delete subs[id];
+  setMeta({ gyms, substitutions: subs, lastGymId: state.meta.lastGymId === id ? (gyms[0]?.id ?? null) : state.meta.lastGymId });
+}
+
+export const gymName = (id) =>
+  id == null ? null : ((state.meta.gyms ?? []).find((g) => g.id === id)?.name ?? 'Deleted gym');
+
+/** "Always at this gym": swap `exerciseId` for `altId` whenever a session is resolved there. */
+export function setSubstitution(gymId, exerciseId, altId) {
+  if (gymId == null) return;
+  const subs = { ...(state.meta.substitutions ?? {}) };
+  const forGym = { ...(subs[gymId] ?? {}) };
+  if (altId == null || altId === exerciseId) delete forGym[exerciseId];
+  else forGym[exerciseId] = altId;
+  subs[gymId] = forGym;
+  setMeta({ substitutions: subs });
+}
+
+/** Station tags seen for an exercise at a gym, most recent first. */
+export function stationsFor(exerciseId, gymId) {
+  const seen = [];
+  for (const row of state.index.get(exerciseId) ?? []) {
+    if (gymId != null && row.gymId !== gymId) continue;
+    if (row.station && !seen.includes(row.station)) seen.push(row.station);
+  }
+  return seen;
 }
 
 export function removeSet(sessionId, entryId, setId) {

@@ -1,13 +1,13 @@
 /** Settings — backup (the important one), profile, storage health, rescue hatches. */
 
 import { el, onTap, append } from '../dom.js';
-import { stepper } from '../stepper.js';
+import { stepper, textSheet } from '../stepper.js';
 import { openSheet, confirmSheet } from '../sheet.js';
 import { toast } from '../toast.js';
 import * as store from '../../data/store.js';
 import * as db from '../../data/db.js';
 import { exportBackup, importBackup, readFile, payloadText } from '../../data/backup.js';
-import { CURRENT_PROGRAM } from '../../program/index.js';
+import { CURRENT_PROGRAM, getExercise } from '../../program/index.js';
 import { APP_VERSION } from '../../version.js';
 import { trainingDate, formatRelativeDate } from '../../core/dates.js';
 import { navigate } from '../../router.js';
@@ -160,6 +160,75 @@ export default function mountSettings(root) {
         bwLog.length
           ? el('p.xs.dim.num', { text: `${bwLog.length} readings since ${formatRelativeDate(bwLog[0].date)}${drift != null ? ` · ${drift > 0 ? '+' : ''}${drift} kg overall` : ''}` })
           : null,
+      ),
+    );
+
+    // ---- GYMS
+    const gyms = meta.gyms ?? [];
+    const gymList = el('div.listgroup');
+    for (const g of gyms) {
+      const subs = Object.entries(meta.substitutions?.[g.id] ?? {});
+      gymList.appendChild(
+        onTap(
+          el(
+            'button.listitem',
+            { type: 'button' },
+            el('span.listitem-mark.listitem-mark--lift'),
+            el(
+              'span.grow',
+              null,
+              el('div.listitem-title', { text: g.name }),
+              el('div.listitem-sub.truncate', {
+                text: `${sessions.filter((x) => x.gymId === g.id && x.status === 'completed').length} sessions${
+                  subs.length ? ` · ${subs.length} standing swap${subs.length === 1 ? '' : 's'}` : ''
+                }`,
+              }),
+            ),
+            meta.lastGymId === g.id ? el('span.pill', { text: 'CURRENT' }) : null,
+          ),
+          () =>
+            openSheet({
+              title: g.name,
+              actions: [
+                {
+                  label: 'Rename',
+                  onSelect: () =>
+                    textSheet({ title: 'Rename gym', value: g.name, onSubmit: (v) => store.renameGym(g.id, v) }),
+                },
+                ...subs.map(([from, to]) => ({
+                  label: `Stop swapping ${getExercise(from).short} → ${getExercise(to).short}`,
+                  variant: 'ghost',
+                  onSelect: () => store.setSubstitution(g.id, from, null),
+                })),
+                {
+                  label: 'Remove gym',
+                  variant: 'danger',
+                  onSelect: () =>
+                    confirmSheet({
+                      title: `Remove ${g.name}?`,
+                      subtitle: 'Sessions logged there keep their history; only the label and its standing swaps go.',
+                      confirmLabel: 'Remove',
+                      onConfirm: () => store.removeGym(g.id),
+                    }),
+                },
+                { label: 'Cancel', variant: 'ghost' },
+              ],
+            }),
+        ),
+      );
+    }
+    blocks.appendChild(
+      el(
+        'div.stack',
+        null,
+        el('div.section-label', { text: 'Gyms' }),
+        gyms.length ? gymList : null,
+        el('p.xs.dim', {
+          text: 'Cable stacks, machines and Smith bars are not the same weight from one gym to the next, so their history is kept per gym — and per station within a gym. Barbells and dumbbells are shared. With two or more gyms, the Today card asks which one you are at.',
+        }),
+        onTap(el('button.btn.btn--ghost.btn--block.btn--sm', { type: 'button', text: '+ Add a gym' }), () =>
+          textSheet({ title: 'Gym name', placeholder: 'e.g. Downtown', onSubmit: (v) => store.addGym(v) }),
+        ),
       ),
     );
 

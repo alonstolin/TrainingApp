@@ -81,6 +81,8 @@
 .chip[data-band='high'][aria-pressed='true'] { background: var(--warn); border-color: var(--warn); color: #1a1200; }
 .chip[data-talk='no'][aria-pressed='true'] { background: var(--warn); border-color: var(--warn); color: #1a1200; }
 
+.pill--tap { cursor: pointer; }
+.pill--tap:disabled { opacity: 0.8; }
 .pill {
   display: inline-flex;
   align-items: center;

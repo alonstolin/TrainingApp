@@ -194,6 +194,30 @@ and silently restarts it from zero. Set `historyAliasDayKey` on the block to poi
 at the day it came from; the alias is consulted only when the current day has no
 history, so it retires itself after one session.
 
+## Two gyms, many cable stations
+
+Cable stacks, selectorised machines and Smith bars are not the same weight from
+one gym to the next — or from one station to the next inside a gym. So each
+exercise in the catalogue says what its load is set on (`equipment`), and for
+the stack-based ones history is kept **per gym and per station**: add your gyms
+in Settings, pick the one you are at on the Today card (only asked when there is
+a choice), and tag the station from inside the logger. The "last time" lookup
+reads exact station → same gym → anywhere, and when it has to reach across to
+the other gym it says so and offers the number as a guide, not a target.
+Barbell, dumbbell and bodyweight work is shared across gyms; a barbell is a
+barbell.
+
+## Swapping an exercise
+
+When the station is taken, **Swap exercise** in the logger offers the catalogue's
+recommended substitutes first (same job, different equipment — selection among
+close variants is second-order for growth, see SYNTHESIS §2.3) and then anything
+grouped by muscle. The block's scheme stays; the load and "last time" come from
+the exercise you pick. With a gym set, a swap can be made **always at this
+gym** — a standing substitution applied whenever a session is resolved there
+and listed under the gym in Settings. Once a set is logged on an entry the swap
+closes and **Add exercise** appends instead, so history is never rewritten.
+
 ## Gym-specific weight increments
 
 Not every stack moves in 2.5kg steps. Open any exercise from Progress and set its

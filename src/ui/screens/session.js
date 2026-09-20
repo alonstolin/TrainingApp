@@ -13,14 +13,14 @@
  */
 
 import { el, onTap, append, clear, fmtWeight, fmtSets, scrollTop } from '../dom.js';
-import { stepper, rpeRow, repRow } from '../stepper.js';
+import { stepper, rpeRow, repRow, textSheet } from '../stepper.js';
 import { startRest, stopRest, renderRest, holdTimer, keepAwake, unlockAudio } from '../timer.js';
 import { runTracker, trackShape, geoSupported } from '../runtracker.js';
 import { downsample } from '../../core/geo.js';
 import { openSheet, confirmSheet } from '../sheet.js';
 import { toast, undoToast } from '../toast.js';
 import * as store from '../../data/store.js';
-import { getExercise } from '../../program/exercises.js';
+import { getExercise, EXERCISES, MUSCLE_LABELS } from '../../program/exercises.js';
 import { formatRelativeDate, formatDuration } from '../../core/dates.js';
 import { paceSecPerKm, formatPace, effectiveLoad, e1rm, runLoadWarnings } from '../../core/progression.js';
 import { sessionIntegrity } from '../../core/schema.js';
@@ -31,7 +31,36 @@ import { navigate } from '../../router.js';
 // Shared chrome
 // ---------------------------------------------------------------------------
 
-function header(session, onFinish) {
+/** Pick the gym for an in-progress session. Only offered when there is a choice. */
+function gymPill(session, onChange) {
+  const gyms = store.getState().meta.gyms ?? [];
+  if (session.kind !== 'lift' || (gyms.length === 0 && session.gymId == null)) return null;
+  const name = store.gymName(session.gymId) ?? 'No gym set';
+  const pill = el('button.pill.pill--tap', { type: 'button', text: name, dataset: { gymPill: '' } });
+  if (session.status !== 'in_progress' || gyms.length < 2) {
+    pill.setAttribute('disabled', 'true');
+    return pill;
+  }
+  onTap(pill, () =>
+    openSheet({
+      title: 'Training where?',
+      subtitle: 'Cable and machine loads are remembered per gym. Exercises you have not logged yet are re-read for the gym you pick.',
+      actions: [
+        ...gyms.map((g) => ({
+          label: g.name + (g.id === session.gymId ? ' · current' : ''),
+          onSelect: () => {
+            store.setSessionGym(session.id, g.id);
+            onChange?.();
+          },
+        })),
+        { label: 'Cancel', variant: 'ghost' },
+      ],
+    }),
+  );
+  return pill;
+}
+
+function header(session, onFinish, onChange) {
   const snap = session.prescriptionSnapshot ?? {};
   return el(
     'header.page-head',
@@ -45,17 +74,157 @@ function header(session, onFinish) {
         : el('span.pill', { text: session.status === 'skipped' ? 'SKIPPED' : 'DONE' }),
     ),
     el('h1.page-title', { text: snap.name ?? session.kind, style: { marginTop: '0.75rem' } }),
-    el('div.page-sub', {
-      text: [
-        formatRelativeDate(session.date),
-        snap.weekInMeso ? `week ${snap.weekInMeso}` : null,
-        snap.isDeload ? 'deload' : null,
-        snap.focus,
-      ]
-        .filter(Boolean)
-        .join(' · '),
-    }),
+    el(
+      'div.row',
+      { style: { gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' } },
+      el('div.page-sub', {
+        text: [
+          formatRelativeDate(session.date),
+          snap.role ? snap.role + (snap.role === 'deload' ? '' : ' week') : snap.weekInMeso ? `week ${snap.weekInMeso}` : null,
+          !snap.role && snap.isDeload ? 'deload' : null,
+          snap.focus,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+      }),
+      gymPill(session, onChange),
+    ),
   );
+}
+
+/**
+ * Swap an entry for another exercise — the station is taken, the bar is
+ * bent, the dumbbells stop at 30. Recommended substitutes first (same job,
+ * different equipment), then anything grouped by muscle. With a gym set the
+ * swap can be made standing: "always at this gym".
+ */
+function swapSheet(session, entry, snapEntry, onDone) {
+  const ex = getExercise(entry.exerciseId);
+  const original = entry.swappedFrom ?? entry.exerciseId;
+  const originalEx = getExercise(original);
+  const recommended = [...new Set([...(originalEx.alternatives ?? []), ...(ex.alternatives ?? [])])]
+    .filter((id) => id !== entry.exerciseId && EXERCISES[id] && !EXERCISES[id].retired);
+  const modality = originalEx.modality;
+  const byMuscle = new Map();
+  for (const e of Object.values(EXERCISES)) {
+    if (e.retired || e.modality !== modality || e.id === entry.exerciseId || recommended.includes(e.id)) continue;
+    if (e.modality === 'run') continue;
+    const key = e.muscle ?? 'other';
+    if (!byMuscle.has(key)) byMuscle.set(key, []);
+    byMuscle.get(key).push(e);
+  }
+  // The original's muscle first, then the rest alphabetically.
+  const groups = [...byMuscle.entries()].sort(([a], [b]) =>
+    a === originalEx.muscle ? -1 : b === originalEx.muscle ? 1 : (MUSCLE_LABELS[a] ?? a).localeCompare(MUSCLE_LABELS[b] ?? b),
+  );
+
+  let close = () => {};
+  const row = (e, sub) =>
+    onTap(
+      el(
+        'button.listitem',
+        { type: 'button', dataset: { swapTo: e.id } },
+        el('span.grow', null, el('div.listitem-title', { text: e.name }), sub ? el('div.listitem-sub.truncate', { text: sub }) : null),
+        e.gymSpecific ? el('span.pill', { text: 'STACK' }) : null,
+      ),
+      () => {
+        close();
+        choose(e);
+      },
+    );
+
+  const choose = (e) => {
+    const gymId = session.gymId;
+    const apply = (standing) => {
+      store.reresolveEntry(session.id, entry.entryId, { exerciseId: e.id, station: null });
+      if (standing && gymId != null) store.setSubstitution(gymId, original, e.id === original ? null : e.id);
+      toast(e.id === original ? `Back to ${e.short}` : `Swapped to ${e.short}${standing ? ' — always here' : ''}`);
+      onDone();
+    };
+    if (gymId == null || e.id === original) {
+      apply(false);
+      return;
+    }
+    openSheet({
+      title: `${e.short} instead of ${originalEx.short}`,
+      subtitle: `Just this once, or every time you train at ${store.gymName(gymId)}?`,
+      actions: [
+        { label: 'Just today', onSelect: () => apply(false) },
+        { label: `Always at ${store.gymName(gymId)}`, onSelect: () => apply(true) },
+        { label: 'Cancel', variant: 'ghost' },
+      ],
+    });
+  };
+
+  const content = el('div.stack');
+  if (entry.swappedFrom) {
+    content.appendChild(el('div.section-label', { style: { marginTop: 0 }, text: 'Programmed' }));
+    content.appendChild(el('div.listgroup', null, row(originalEx, 'Back to the programmed exercise')));
+  }
+  if (recommended.length) {
+    content.appendChild(el('div.section-label', { style: { marginTop: entry.swappedFrom ? undefined : 0 }, text: 'Recommended' }));
+    content.appendChild(el('div.listgroup', null, ...recommended.map((id) => row(getExercise(id), getExercise(id).cue))));
+  }
+  for (const [muscle, list] of groups) {
+    content.appendChild(el('div.section-label', { text: MUSCLE_LABELS[muscle] ?? muscle }));
+    content.appendChild(el('div.listgroup', null, ...list.map((e) => row(e))));
+  }
+
+  close = openSheet({
+    title: `Swap ${ex.short}`,
+    subtitle: `${snapEntry.label ?? ''} stays the same — the load and "last time" come from the exercise you pick.`,
+    content,
+  });
+}
+
+/** Append an exercise to the session — for when a set is already logged. */
+function addExerciseSheet(session, onDone) {
+  let close = () => {};
+  const byMuscle = new Map();
+  for (const e of Object.values(EXERCISES)) {
+    if (e.retired || e.modality === 'run') continue;
+    const key = e.muscle ?? 'other';
+    if (!byMuscle.has(key)) byMuscle.set(key, []);
+    byMuscle.get(key).push(e);
+  }
+  const content = el('div.stack');
+  for (const [muscle, list] of [...byMuscle.entries()].sort(([a], [b]) => (MUSCLE_LABELS[a] ?? a).localeCompare(MUSCLE_LABELS[b] ?? b))) {
+    content.appendChild(el('div.section-label', { text: MUSCLE_LABELS[muscle] ?? muscle }));
+    content.appendChild(
+      el(
+        'div.listgroup',
+        null,
+        ...list.map((e) =>
+          onTap(el('button.listitem', { type: 'button' }, el('span.grow', null, el('div.listitem-title', { text: e.name }))), () => {
+            close();
+            store.addEntry(session.id, e.id);
+            toast(`Added ${e.short}`);
+            onDone();
+          }),
+        ),
+      ),
+    );
+  }
+  close = openSheet({ title: 'Add an exercise', subtitle: 'Appended to the end of this session, three sets by default.', content });
+}
+
+/** Tag which station this entry was done on — remembered per exercise per gym. */
+function stationSheet(session, entry, onDone) {
+  const known = store.stationsFor(entry.exerciseId, session.gymId);
+  const set = (station) => {
+    store.reresolveEntry(session.id, entry.entryId, { station });
+    onDone();
+  };
+  openSheet({
+    title: 'Which station?',
+    subtitle: 'Two cable machines in one gym rarely pull the same. Tag the one you are on and its history stays its own.',
+    actions: [
+      ...known.map((k) => ({ label: k + (entry.station === k ? ' · current' : ''), onSelect: () => set(k) })),
+      { label: 'New station…', onSelect: () => textSheet({ title: 'Station name', placeholder: 'e.g. left stack', onSubmit: (v) => set(v) }) },
+      ...(entry.station ? [{ label: 'No station', variant: 'ghost', onSelect: () => set(null) }] : []),
+      { label: 'Cancel', variant: 'ghost' },
+    ],
+  });
 }
 
 function actionBar(...children) {
@@ -252,7 +421,7 @@ function mountLift(screen, session, ctx) {
     }
     const current = entry.sets.find((s) => s.setId === activeSet);
 
-    append(screen, [header(session, () => finishFlow(session, ctx))]);
+    append(screen, [header(session, () => finishFlow(session, ctx), () => { activeSet = null; render(); })]);
 
     // ---- exercise switcher (core work gets a divider — it is the tail of the day)
     const nav = el('div.exnav');
@@ -326,6 +495,31 @@ function mountLift(screen, session, ctx) {
         snapEntry.suggestion ? el('div.suggestion', { text: snapEntry.suggestion }) : null,
         ex.cue ? el('div.cue', { text: ex.cue }) : null,
         ex.perSide ? el('div.small.muted', { text: 'Both sides count as one set.' }) : null,
+
+        // Station and swap. Both re-resolve the entry, so both close once a set
+        // is logged; after that the honest move is to add another exercise.
+        el(
+          'div.btn-row',
+          { style: { marginTop: '0.25rem' } },
+          ex.gymSpecific && session.gymId != null
+            ? onTap(
+                el('button.btn.btn--sm.btn--ghost', {
+                  type: 'button',
+                  text: entry.station ? `Station: ${entry.station}` : 'Station: any',
+                  dataset: { station: '' },
+                  ...(entry.sets.some((x) => x.done) ? { disabled: 'true' } : {}),
+                }),
+                () => stationSheet(session, entry, () => { activeSet = null; render(); }),
+              )
+            : null,
+          entry.sets.some((x) => x.done)
+            ? onTap(el('button.btn.btn--sm.btn--ghost', { type: 'button', text: '+ Add exercise', dataset: { addExercise: '' } }), () =>
+                addExerciseSheet(session, () => { activeEntry = session.entries.length - 1; activeSet = null; render(); scrollTop(); }),
+              )
+            : onTap(el('button.btn.btn--sm.btn--ghost', { type: 'button', text: entry.swappedFrom ? 'Swapped · change' : 'Swap exercise', dataset: { swap: '' } }), () =>
+                swapSheet(session, entry, snapEntry, () => { activeSet = null; render(); }),
+              ),
+        ),
       ),
     );
 
