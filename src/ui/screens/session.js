@@ -15,7 +15,7 @@
 import { el, onTap, append, clear, fmtWeight, fmtSets, scrollTop } from '../dom.js';
 import { stepper, rpeRow, repRow, textSheet } from '../stepper.js';
 import { startRest, stopRest, renderRest, holdTimer, keepAwake, unlockAudio } from '../timer.js';
-import { runTracker, trackShape, geoSupported } from '../runtracker.js';
+import { runTracker, trackMapCard, geoSupported } from '../runtracker.js';
 import { downsample } from '../../core/geo.js';
 import { openSheet, confirmSheet } from '../sheet.js';
 import { toast, undoToast } from '../toast.js';
@@ -694,27 +694,98 @@ function mountRun(screen, session, ctx) {
     talkTest: session.run?.talkTest ?? null,
     notes: session.run?.notes ?? '',
     track: session.run?.track ?? null,
+    routeId: session.run?.routeId ?? null,
+    plannedKm: session.run?.plannedKm ?? null,
   };
 
   // null → not chosen yet, 'gps' | 'timer' | 'manual'
   let mode = draft.track?.length ? 'gps' : null;
   let tracker = null;
+  let mapCard = null;
 
   const stopTracker = () => {
     tracker?.stop?.();
     tracker = null;
+    mapCard?.destroy();
+    mapCard = null;
   };
   ctx.onTeardown?.(stopTracker);
+
+  const routeOf = () => (draft.routeId ? store.getRoute(draft.routeId) : null);
+
+  /** Pick a saved route, or go and plan one; the planner comes back here. */
+  function routeCard() {
+    const route = routeOf();
+    const { routes } = store.getState();
+    const pick = () => {
+      let close = () => {};
+      const list = el(
+        'div.listgroup',
+        null,
+        ...routes.map((r) =>
+          onTap(
+            el('button.listitem', { type: 'button', dataset: { pickRoute: r.id } },
+              el('span.listitem-mark.listitem-mark--run'),
+              el('span.grow', null, el('div.listitem-title', { text: r.name })),
+              el('span.num', { text: `${r.km.toFixed(2)} km` }),
+            ),
+            () => {
+              close();
+              draft.routeId = r.id;
+              draft.plannedKm = r.km;
+              // The route's distance is the honest prefill until GPS says otherwise.
+              if (!draft.track?.length) draft.distanceKm = r.km;
+              save();
+              render();
+            },
+          ),
+        ),
+      );
+      close = openSheet({
+        title: 'Which route?',
+        content: routes.length ? list : el('p.small.muted', { text: 'No saved routes yet.' }),
+        actions: [
+          { label: '+ Plan a new route', onSelect: () => navigate(`/routes/new?back=session/${session.id}`) },
+          { label: 'Cancel', variant: 'ghost' },
+        ],
+      });
+    };
+    return el(
+      'div.card',
+      { dataset: { routeCard: '' } },
+      el('div.row-between', null,
+        el('div.grow', null,
+          el('div.eyebrow', { text: 'Route' }),
+          route
+            ? el('div.listitem-title', { text: `${route.name} · ${route.km.toFixed(2)} km` })
+            : el('div.small.muted', { text: 'Plan the loop first and the distance is known before you start.' }),
+        ),
+        el('div.btn-row', null,
+          onTap(el('button.btn.btn--sm', { type: 'button', text: route ? 'Change' : 'Pick a route' }), pick),
+          route
+            ? onTap(el('button.btn.btn--sm.btn--ghost', { type: 'button', text: 'Remove' }), () => {
+                draft.routeId = null;
+                draft.plannedKm = null;
+                save();
+                render();
+              })
+            : null,
+        ),
+      ),
+    );
+  }
 
   /** Track live, time it, or just type the numbers in. */
   function modeBlock() {
     if (mode === 'gps' && draft.track?.length && !tracker) {
-      // Already tracked — show the traced route rather than the controls.
+      // Already tracked — show the route on the map rather than the controls.
+      mapCard?.destroy();
+      mapCard = trackMapCard({ track: draft.track, route: routeOf() });
       return el(
         'div.card',
         null,
         el('div.eyebrow', { text: 'Tracked route' }),
-        trackShape(draft.track),
+        mapCard.node,
         el('p.xs.dim', { text: `${draft.track.length} GPS points recorded.` }),
       );
     }
@@ -723,6 +794,7 @@ function mountRun(screen, session, ctx) {
       stopTracker();
       tracker = runTracker({
         useGps: mode === 'gps',
+        route: routeOf(),
         onFinish: ({ seconds, km, track }) => {
           if (seconds > 0) draft.durationSec = seconds;
           if (km) draft.distanceKm = km;
@@ -859,6 +931,7 @@ function mountRun(screen, session, ctx) {
           snap.note ? el('p.small', { text: snap.note, style: { marginTop: '0.4rem', color: 'var(--warn)' } }) : null,
         ),
 
+        mode == null ? routeCard() : null,
         modeBlock(),
 
         el('div', null, el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'Distance'), distStep),
@@ -938,7 +1011,7 @@ function mountRun(screen, session, ctx) {
 // Completed / read-only view
 // ---------------------------------------------------------------------------
 
-function renderCompleted(screen, session) {
+function renderCompleted(screen, session, teardownCompleted = []) {
   clear(screen);
   append(screen, [header(session, () => {})]);
 
@@ -953,8 +1026,19 @@ function renderCompleted(screen, session) {
 
   if (session.kind === 'run' && session.run) {
     const p = paceSecPerKm(session.run.distanceKm, session.run.durationSec);
-    if (session.run.track?.length > 1) {
-      append(screen, [el('div.card', null, el('div.eyebrow', { text: 'Route' }), trackShape(session.run.track))]);
+    const route = session.run.routeId ? store.getRoute(session.run.routeId) : null;
+    if (session.run.track?.length > 1 || route) {
+      const card = trackMapCard({ track: session.run.track ?? [], route });
+      teardownCompleted.push(() => card.destroy());
+      append(screen, [
+        el('div.card', null,
+          el('div.eyebrow', { text: route ? `Route · ${route.name}` : 'Route' }),
+          card.node,
+          route && session.run.plannedKm
+            ? el('p.xs.dim', { style: { marginTop: '0.4rem' }, text: `Planned ${session.run.plannedKm.toFixed(2)} km · ran ${session.run.distanceKm} km` })
+            : null,
+        ),
+      ]);
     }
     body.appendChild(
       el(
@@ -1051,9 +1135,10 @@ export default function mountSession(root, params) {
   }
 
   if (session.status !== 'in_progress') {
-    renderCompleted(screen, session);
+    const teardown = [];
+    renderCompleted(screen, session, teardown);
     renderRest();
-    return {};
+    return { unmount: () => teardown.forEach((fn) => fn()) };
   }
 
   unlockAudio();

@@ -21,6 +21,7 @@ import { deriveCursors, makeHistoryLookup } from '../core/schedule.js';
 import { resolveBlock, weekModifier } from '../core/prescribe.js';
 import { backoffLoad, loadFromReference, e1rm, effectiveLoad } from '../core/progression.js';
 import { getExercise, setIncrementOverrides } from '../program/exercises.js';
+import { makeRoute } from '../core/routes.js';
 
 const PERSIST_DEBOUNCE_MS = 250;
 
@@ -28,6 +29,8 @@ const state = {
   ready: false,
   meta: { ...DEFAULT_META },
   sessions: [],
+  /** Planned running routes — see core/routes.js. */
+  routes: [],
   /** exerciseId → [{date, sessionId, sets, bodyweightKg}], newest first */
   index: new Map(),
   storage: { persisted: false, supported: false },
@@ -220,10 +223,12 @@ export function setMeta(patch) {
 
 export async function init() {
   try {
-    const [sessions, metaRows] = await Promise.all([
+    const [sessions, metaRows, routes] = await Promise.all([
       db.getAll(db.STORES.sessions),
       db.getAll(db.STORES.meta),
+      db.getAll(db.STORES.routes).catch(() => []),
     ]);
+    state.routes = routes.sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
     state.sessions = sessions.sort((a, b) =>
       a.date < b.date ? -1 : a.date > b.date ? 1 : (a.startedAt ?? 0) - (b.startedAt ?? 0),
     );
@@ -685,14 +690,41 @@ export function deleteSession(id) {
 // Bulk operations (import)
 // ---------------------------------------------------------------------------
 
-export async function replaceAllData(meta, sessions) {
+export async function replaceAllData(meta, sessions, routes = null) {
   state.meta = { ...DEFAULT_META, ...meta, schemaVersion: SCHEMA_VERSION };
   state.sessions = [...sessions].sort((a, b) =>
     a.date < b.date ? -1 : a.date > b.date ? 1 : (a.startedAt ?? 0) - (b.startedAt ?? 0),
   );
   await db.replaceAll(db.STORES.sessions, state.sessions);
   await db.put(db.STORES.meta, { key: 'meta', value: state.meta });
+  if (routes) {
+    state.routes = [...routes].sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0));
+    await db.replaceAll(db.STORES.routes, state.routes);
+  }
   rebuildIndex();
+  notify();
+}
+
+// ---------------------------------------------------------------------------
+// Routes
+// ---------------------------------------------------------------------------
+
+export const getRoute = (id) => state.routes.find((r) => r.id === id) ?? null;
+
+/** Create or update a route. Persisted immediately — a route is a few hundred bytes. */
+export function saveRoute({ id, name, waypoints }) {
+  const existing = id ? getRoute(id) : null;
+  const route = makeRoute({ id: existing?.id ?? id ?? newId('rt'), name, waypoints });
+  if (existing) route.createdAt = existing.createdAt;
+  state.routes = [route, ...state.routes.filter((r) => r.id !== route.id)];
+  db.put(db.STORES.routes, route).catch((e) => console.error('route persist failed', e));
+  notify();
+  return route;
+}
+
+export function deleteRoute(id) {
+  state.routes = state.routes.filter((r) => r.id !== id);
+  db.del(db.STORES.routes, id).catch((e) => console.error('route delete failed', e));
   notify();
 }
 

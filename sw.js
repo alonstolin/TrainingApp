@@ -13,10 +13,38 @@
  */
 
 // <<<GENERATED-VERSION-START>>>
-const VERSION = '2026.09.20-972ba6b3';
+const VERSION = '2026.09.20-40bffce0';
 // <<<GENERATED-VERSION-END>>>
 
 const CACHE = `training-${VERSION}`;
+
+// Map tiles are the one cross-origin thing the app fetches. They are cached
+// at runtime (cache-first — a tile does not change) in their own bucket that
+// survives app updates, trimmed FIFO so a summer of routes cannot fill the
+// phone. Everything else cross-origin is left to the browser.
+const TILE_CACHE = 'training-tiles-v1';
+const TILE_HOSTS = ['basemaps.cartocdn.com', 'tile.openstreetmap.org'];
+const TILE_LIMIT = 600;
+const isTileHost = (host) => TILE_HOSTS.some((h) => host === h || host.endsWith('.' + h));
+
+async function trimTiles() {
+  const cache = await caches.open(TILE_CACHE);
+  const keys = await cache.keys();
+  // Cache API keys come back in insertion order; drop the oldest.
+  const excess = keys.length - TILE_LIMIT;
+  for (let i = 0; i < excess; i++) await cache.delete(keys[i]);
+}
+
+async function tileResponse(req) {
+  const cache = await caches.open(TILE_CACHE);
+  const hit = await cache.match(req);
+  if (hit) return hit;
+  const res = await fetch(req);
+  if (res.ok) {
+    cache.put(req, res.clone()).then(trimTiles).catch(() => {});
+  }
+  return res;
+}
 
 // <<<PRECACHE-START>>>
 const PRECACHE = [
@@ -34,6 +62,7 @@ const PRECACHE = [
   './src/core/ids.js',
   './src/core/prescribe.js',
   './src/core/progression.js',
+  './src/core/routes.js',
   './src/core/schedule.js',
   './src/core/schema.js',
   './src/core/stats.js',
@@ -49,11 +78,13 @@ const PRECACHE = [
   './src/router.js',
   './src/ui/chart.js',
   './src/ui/dom.js',
+  './src/ui/map.js',
   './src/ui/runtracker.js',
   './src/ui/screens/calendar.js',
   './src/ui/screens/exercise.js',
   './src/ui/screens/history.js',
   './src/ui/screens/progress.js',
+  './src/ui/screens/routes.js',
   './src/ui/screens/session.js',
   './src/ui/screens/settings.js',
   './src/ui/screens/today.js',
@@ -65,6 +96,8 @@ const PRECACHE = [
   './styles/base.css',
   './styles/components.css',
   './styles/tokens.css',
+  './vendor/leaflet/leaflet.css',
+  './vendor/leaflet/leaflet.js',
 ];
 // <<<PRECACHE-END>>>
 
@@ -96,7 +129,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     (async () => {
       const names = await caches.keys();
-      await Promise.all(names.filter((n) => n !== CACHE).map((n) => caches.delete(n)));
+      await Promise.all(names.filter((n) => n !== CACHE && n !== TILE_CACHE).map((n) => caches.delete(n)));
       await self.clients.claim();
     })(),
   );
@@ -114,7 +147,10 @@ self.addEventListener('fetch', (event) => {
   if (req.method !== 'GET') return;
 
   const url = new URL(req.url);
-  if (url.origin !== self.location.origin) return;
+  if (url.origin !== self.location.origin) {
+    if (isTileHost(url.hostname)) event.respondWith(tileResponse(req));
+    return;
+  }
 
   // Hash routing means every route resolves to the one document, so navigations
   // always serve cached index.html. Deep links and offline nav never 404.

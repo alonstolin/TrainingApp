@@ -14,6 +14,7 @@ import mountHistory from './ui/screens/history.js';
 import mountProgress from './ui/screens/progress.js';
 import mountSettings from './ui/screens/settings.js';
 import mountExercise from './ui/screens/exercise.js';
+import { mountRoutes, mountRoutePlanner } from './ui/screens/routes.js';
 
 // ---------------------------------------------------------------------------
 // Service worker
@@ -144,6 +145,8 @@ async function boot() {
   register('/history', mountHistory);
   register('/progress', mountProgress);
   register('/exercise/:id', mountExercise);
+  register('/routes', mountRoutes);
+  register('/routes/:id', mountRoutePlanner);
   register('/settings', mountSettings);
 
   document.getElementById('tabbar').hidden = false;

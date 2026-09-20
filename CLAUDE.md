@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-A single-user offline iPhone PWA holding a strength + hypertrophy + 10K running program and logging every set, run and core session against it. Vanilla JS ES modules, **zero runtime dependencies, no build step, no bundler**. Deployed to GitHub Pages at `https://alonstolin.github.io/TrainingApp/` from `main`. The repo is public.
+A single-user offline iPhone PWA holding a strength + hypertrophy + 10K running program and logging every set, run and core session against it. Vanilla JS ES modules, **no build step, no bundler, and no runtime dependencies except one**: Leaflet 1.9.4, vendored and pinned in `vendor/leaflet/` and loaded lazily by `src/ui/map.js` only on screens that show a map. Do not add another. Deployed to GitHub Pages at `https://alonstolin.github.io/TrainingApp/` from `main`. The repo is public.
 
 README.md carries the program design, the research behind it, and the rationale for the non-obvious engineering decisions. Read it before changing the program or the scheduler.
 
@@ -63,6 +63,10 @@ Everything hard lives here — schedule, prescription, progression, stats, calen
 ### Storage
 
 IndexedDB, one record per session, all loaded into memory at boot (`src/data/store.js`). Every UI read is a synchronous lookup. Writes are debounced but serialised through a single chain so `await flush()` waits for everything in flight — `pagehide` is the only unload event iOS reliably fires, and it tears the page down immediately after. Backup is JSON export/import; there is no server and no account.
+
+### Maps and routes
+
+`src/ui/map.js` owns Leaflet: `loadLeaflet()` injects the vendored script once; `createMap(container)` returns the three layers the app draws (route dashed, track solid, position dot). Map containers are usually created before they are attached, so the wrapper watches the container with a ResizeObserver and replays a deferred `fit` — do not call Leaflet directly from a screen. Tiles come from two key-free hosts and are the only cross-origin requests the app makes; `sw.js` caches them in `training-tiles-v1` (cache-first, FIFO-trimmed, kept across app updates). Route maths is DOM-free in `core/routes.js`; routes live in their own IndexedDB store (`DB_VERSION 2`) and in the backup envelope. In e2e, abort the tile hosts with `page.route` and drive the planner through `window.__planner` — emulated touch never reaches Leaflet's handlers.
 
 ### Service worker and updates
 

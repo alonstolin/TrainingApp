@@ -7,6 +7,8 @@
  * about the handful of fields the app cannot function without.
  */
 
+import { validateRoute } from './routes.js';
+
 export const SCHEMA_VERSION = 2;
 export const BACKUP_FORMAT = 'trainingapp-backup';
 
@@ -139,6 +141,12 @@ export function validateBackup(raw) {
     if (e.length) warnings.push(...e);
     else clean.push(s);
   });
+  const cleanRoutes = [];
+  (data.routes ?? []).forEach((r, i) => {
+    const e = validateRoute(r, `route[${i}]`);
+    if (e.length) warnings.push(...e);
+    else cleanRoutes.push(r);
+  });
 
   if (clean.length === 0 && data.sessions.length > 0) {
     return { ok: false, errors: ['Every session in the backup failed validation'], warnings };
@@ -151,6 +159,7 @@ export function validateBackup(raw) {
     data: migrate({
       ...data,
       sessions: clean,
+      routes: cleanRoutes,
       meta: { ...DEFAULT_META, ...(data.meta ?? {}) },
     }),
   };

@@ -11,12 +11,15 @@
  */
 
 const DB_NAME = 'training-app';
-const DB_VERSION = 1;
+// v2 added the routes store. onupgradeneeded only creates what is missing, so
+// an upgrade from v1 keeps every session exactly where it was.
+const DB_VERSION = 2;
 
 export const STORES = {
   sessions: 'sessions',
   meta: 'meta',
   backups: 'backups',
+  routes: 'routes',
 };
 
 let dbPromise = null;
@@ -43,6 +46,9 @@ export function openDb() {
       }
       if (!db.objectStoreNames.contains(STORES.backups)) {
         db.createObjectStore(STORES.backups, { keyPath: 'id' });
+      }
+      if (!db.objectStoreNames.contains(STORES.routes)) {
+        db.createObjectStore(STORES.routes, { keyPath: 'id' });
       }
       void ev;
     };
@@ -150,5 +156,5 @@ export async function storageEstimate() {
 
 /** Nuclear option, exposed in Settings. Never called automatically. */
 export async function wipeAll() {
-  await Promise.all([clear(STORES.sessions), clear(STORES.meta), clear(STORES.backups)]);
+  await Promise.all([clear(STORES.sessions), clear(STORES.meta), clear(STORES.backups), clear(STORES.routes)]);
 }

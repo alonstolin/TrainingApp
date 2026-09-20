@@ -228,6 +228,28 @@ suggested load, so the app stops proposing weights that do not exist on it.
 Independently of that, tapping the number on any stepper opens a keypad that takes
 **any** value to two decimals. 6.25 is stored as 6.25.
 
+## Routes on a real map
+
+**Routes** (from a run's route card, or Progress → Running) plans a run on a
+map: tap the corners of the streets you will run and the distance adds up live
+at the top, next to the rung the plan wants next. Start from your current
+location or from the first tap; drag a corner to move it, tap one to remove it;
+**Close loop** and **Out & back** do what they say. Straight segments between
+taps, deliberately — no road-snapping service, nothing to go down, and within a
+few percent when you tap the corners. Saved routes are picked on the run screen,
+prefill the distance, draw dashed under the live GPS track with your position
+on top, and stay on the logged run.
+
+The map is [Leaflet](https://leafletjs.com) 1.9.4, vendored in `vendor/leaflet/`
+and precached with the app — the one exception to "zero runtime dependencies",
+made because pinch-zoom on iOS is not something worth rewriting. Tiles are the
+only network dependency the app has: CARTO's dark basemap (free for
+non-commercial use, attribution shown) with OpenStreetMap as the fallback, both
+key-free so nothing secret lives in this public repo. The service worker caches
+every tile you view in its own bucket (600 tiles, oldest out first), so the
+routes you actually run stay viewable offline; a tile never seen is a grey
+square with the route still drawn on it.
+
 ## Running: stopwatch and GPS
 
 The run logger offers three ways to fill itself in:

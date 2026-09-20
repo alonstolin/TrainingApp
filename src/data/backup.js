@@ -131,9 +131,22 @@ export async function importBackup(raw, mode = 'merge') {
           onboarded: current.meta.onboarded || incoming.meta.onboarded,
         };
 
-  await store.replaceAllData(meta, sessions);
+  // Routes: replace wholesale on replace; union by id (newest wins) on merge.
+  const incomingRoutes = incoming.routes ?? [];
+  let routes;
+  if (mode === 'replace') routes = incomingRoutes;
+  else {
+    const byId = new Map(current.routes.map((r) => [r.id, r]));
+    for (const r of incomingRoutes) {
+      const cur = byId.get(r.id);
+      if (!cur || (r.updatedAt ?? 0) > (cur.updatedAt ?? 0)) byId.set(r.id, r);
+    }
+    routes = [...byId.values()];
+  }
 
-  return { ok: true, mode, stats, warnings: result.warnings, total: sessions.length };
+  await store.replaceAllData(meta, sessions, routes);
+
+  return { ok: true, mode, stats, warnings: result.warnings, total: sessions.length, routes: routes.length };
 }
 
 /** Restore one of the automatic pre-import snapshots. */

@@ -237,6 +237,10 @@ async function stubGeolocation(page, { points = 60, denied = false } = {}) {
   );
 }
 
+/** Map tiles never leave the test machine: abort both tile hosts. */
+const blockTiles = (page) =>
+  page.route(/basemaps\.cartocdn\.com|tile\.openstreetmap\.org/, (route) => route.abort());
+
 /** Get to a run session regardless of what today offers. */
 async function startRun(page) {
   await page.evaluate(async () => {
@@ -271,6 +275,7 @@ test('the stopwatch fills in the run duration', async ({ page }) => {
 });
 
 test('a GPS-tracked run records distance and draws the route', async ({ page }) => {
+  await blockTiles(page);
   await stubGeolocation(page, { points: 80 });
   await boot(page);
   await startRun(page);
@@ -279,8 +284,12 @@ test('a GPS-tracked run records distance and draws the route', async ({ page }) 
   await page.locator('button', { hasText: /^Start run$/ }).click();
   await page.waitForTimeout(2500);
 
-  // A route should be drawing itself as fixes arrive.
-  await expect(page.locator('.trackshape')).toBeVisible();
+  // A route should be drawing itself as fixes arrive — on the live map
+  // (tiles are blocked in tests; the track polyline still draws), with the
+  // SVG trace as the fallback when the map cannot load.
+  // (The synthetic track is a straight line north, so its bounding box has no
+  // width — assert the path data, not visibility.)
+  await expect(page.locator('[data-map="live"] path.track-line, .trackshape path').first()).toHaveAttribute('d', /^M/);
 
   await page.locator('button', { hasText: /^Use this$/ }).click();
 
@@ -299,6 +308,7 @@ test('a GPS-tracked run records distance and draws the route', async ({ page }) 
 });
 
 test('a GPS run can be logged and its route survives a reload', async ({ page }) => {
+  await blockTiles(page);
   await stubGeolocation(page, { points: 60 });
   await boot(page);
   await startRun(page);
@@ -312,7 +322,7 @@ test('a GPS run can be logged and its route survives a reload', async ({ page })
   await expect(page.locator('.page-title')).toBeVisible();
   await page.goto('./#/history');
   await page.locator('.listitem').first().click();
-  await expect(page.locator('.trackshape')).toBeVisible();
+  await expect(page.locator('[data-map="track"] path.track-line, .trackshape path').first()).toHaveAttribute('d', /^M/);
 });
 
 test('denied GPS permission explains itself instead of dead-ending', async ({ page }) => {

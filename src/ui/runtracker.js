@@ -18,6 +18,7 @@ import { keepAwake } from './timer.js';
 import { formatDuration } from '../core/dates.js';
 import { createTrackBuilder, recentPace, projectTrack } from '../core/geo.js';
 import { formatPace } from '../core/progression.js';
+import { createMap } from './map.js';
 
 export const geoSupported = () => typeof navigator !== 'undefined' && 'geolocation' in navigator;
 
@@ -56,9 +57,42 @@ export function trackShape(points, { width = 320, height = 180 } = {}) {
 }
 
 /**
- * @param {{useGps:boolean, onFinish:({seconds, km, track}) => void}} o
+ * A finished run on the map: the track, the planned route if there was one,
+ * start and finish. Falls back to the dependency-free SVG trace when the map
+ * cannot load (no Leaflet, no network on first use).
+ *
+ * @returns {{node: HTMLElement, destroy(): void}}
  */
-export function runTracker({ useGps = false, onFinish }) {
+export function trackMapCard({ track, route, height = 240 }) {
+  const box = el('div.mapbox.mapbox--card', { style: { height: `${height}px`, minHeight: `${height}px` }, dataset: { map: 'track' } });
+  let api = null;
+  let dead = false;
+  createMap(box, { interactive: true, zoomed: true })
+    .then((m) => {
+      if (dead) return m.destroy();
+      api = m;
+      if (route?.waypoints?.length) m.setRoute(route.waypoints);
+      if (track?.length) m.setTrack(track);
+      m.fit([...(track ?? []), ...(route?.waypoints ?? [])]);
+    })
+    .catch(() => {
+      box.classList.remove('mapbox');
+      box.textContent = '';
+      if (track?.length > 1) box.appendChild(trackShape(track));
+    });
+  return {
+    node: box,
+    destroy() {
+      dead = true;
+      api?.destroy();
+    },
+  };
+}
+
+/**
+ * @param {{useGps:boolean, route?:object, onFinish:({seconds, km, track}) => void}} o
+ */
+export function runTracker({ useGps = false, route = null, onFinish }) {
   let startedAt = null;
   let elapsedBefore = 0;
   let ticker = null;
@@ -74,6 +108,39 @@ export function runTracker({ useGps = false, onFinish }) {
   const paceEl = el('div.stat-value.num', { text: '—' });
   const statusEl = el('div.xs.dim', { text: status });
   const shapeBox = el('div.trackbox');
+  // The live map: planned route dashed, the track solid, a dot for you. When it
+  // cannot load, the SVG trace in shapeBox takes over.
+  const mapBox = el('div.mapbox.mapbox--card', { dataset: { map: 'live' } });
+  const followBtn = el('button.map-follow', { type: 'button', text: 'Following', 'aria-pressed': 'true' });
+  let mapApi = null;
+  let mapFailed = false;
+  if (useGps) {
+    mapBox.appendChild(followBtn);
+    createMap(mapBox, {
+      follow: true,
+      onFollowChange: (on) => {
+        followBtn.setAttribute('aria-pressed', String(on));
+        followBtn.textContent = on ? 'Following' : 'Follow me';
+      },
+    })
+      .then((api) => {
+        mapApi = api;
+        mapBox.appendChild(followBtn);
+        if (route?.waypoints?.length) {
+          api.setRoute(route.waypoints);
+          api.fit(route.waypoints);
+        }
+        if (track.length) {
+          api.setTrack(track);
+          api.setPosition(track[track.length - 1]);
+        }
+      })
+      .catch(() => {
+        mapFailed = true;
+        mapBox.remove();
+      });
+    onTap(followBtn, () => mapApi?.setFollow(!mapApi.isFollowing()));
+  }
 
   const elapsed = () =>
     elapsedBefore + (startedAt ? (Date.now() - startedAt) / 1000 : 0);
@@ -108,7 +175,10 @@ export function runTracker({ useGps = false, onFinish }) {
     const { accepted, reason } = builder.push(fix);
     if (accepted) {
       status = `GPS: tracking · ±${Math.round(fix.acc ?? 0)}m`;
-      if (track.length === 1 || track.length % 5 === 0) renderShape();
+      if (mapApi) {
+        mapApi.setPosition(track[track.length - 1] ? { ...track[track.length - 1], acc: fix.acc } : fix);
+        if (track.length === 1 || track.length % 3 === 0) mapApi.setTrack(track);
+      } else if (mapFailed && (track.length === 1 || track.length % 5 === 0)) renderShape();
     } else if (reason === 'inaccurate') {
       status = `GPS: weak signal (±${Math.round(fix.acc ?? 0)}m) — not recording`;
     }
@@ -197,6 +267,7 @@ export function runTracker({ useGps = false, onFinish }) {
           el('div.stat', null, paceEl, el('div.stat-label', { text: 'recent pace' })),
         )
       : null,
+    useGps ? mapBox : null,
     useGps ? shapeBox : null,
     btn,
     finishBtn,
@@ -213,6 +284,8 @@ export function runTracker({ useGps = false, onFinish }) {
     endWatch();
     wake?.();
     wake = null;
+    mapApi?.destroy();
+    mapApi = null;
   };
   paint();
   return root;

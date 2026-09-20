@@ -613,3 +613,49 @@
   margin: var(--sp-3) 0 var(--sp-1);
 }
 .chart-dot { width: 8px; height: 8px; border-radius: var(--r-full); flex: 0 0 auto; }
+
+/* ---- Maps ---------------------------------------------------------------- */
+
+/* The planner is a map with a readout on top and tools underneath; the map
+   takes whatever height the viewport leaves. Session maps are fixed-height
+   cards. Leaflet's own CSS is loaded with the library. */
+.screen--map { display: flex; flex-direction: column; min-height: 100dvh; padding-bottom: calc(var(--sp-4) + var(--safe-bottom)); }
+.page-head--tight { margin-bottom: var(--sp-3); }
+.mapbox {
+  position: relative;
+  width: 100%;
+  min-height: 42dvh;
+  flex: 1 1 auto;
+  border-radius: var(--r-md);
+  overflow: hidden;
+  background: var(--surface-2);
+  border: 1px solid var(--line);
+  touch-action: none;
+}
+.mapbox--card { flex: 0 0 auto; height: 240px; min-height: 240px; margin-top: var(--sp-3); }
+.map-tools { display: flex; gap: var(--sp-2); flex-wrap: wrap; margin-top: var(--sp-3); }
+.map-actions { margin-top: var(--sp-3); display: grid; gap: var(--sp-2); }
+.route-readout { margin-top: var(--sp-3); }
+.route-km { display: inline; font-size: var(--fs-3xl); font-weight: 800; letter-spacing: -0.02em; line-height: 1; }
+.route-km-unit { font-size: var(--fs-md); color: var(--ink-3); font-weight: 600; }
+.route-km-note { font-size: var(--fs-sm); color: var(--ink-3); margin-top: var(--sp-1); }
+.route-readout[data-on-target='yes'] .route-km { color: var(--good); }
+
+/* Waypoint markers: a dot, the first one filled. */
+.wp { background: none; border: none; }
+.wp-dot {
+  display: block; width: 18px; height: 18px; border-radius: 50%;
+  background: var(--bg); border: 3px solid #8ab4ff; box-sizing: border-box;
+}
+.wp-dot--start { background: #8ab4ff; }
+
+/* Leaflet chrome on a dark app. */
+.leaflet-container { background: #1a1a1a; font-family: inherit; }
+.leaflet-container .leaflet-control-attribution { background: rgba(0,0,0,0.55); color: #aaa; font-size: 10px; }
+.leaflet-container .leaflet-control-attribution a { color: #ccc; }
+.map-follow {
+  position: absolute; right: 10px; bottom: 10px; z-index: 500;
+  min-height: 36px; padding: 0 var(--sp-3); border-radius: var(--r-full);
+  background: rgba(13,13,13,0.85); color: var(--ink); border: 1px solid var(--line); font-size: var(--fs-sm); font-weight: 600;
+}
+.map-follow[aria-pressed='true'] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }

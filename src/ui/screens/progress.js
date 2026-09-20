@@ -290,6 +290,13 @@ function runningTab(sessions) {
     ]);
   }
 
+  const { routes } = store.getState();
+  append(wrap, [
+    onTap(el('button.btn.btn--block', { type: 'button', text: routes.length ? `Your routes · ${routes.length}` : 'Plan a route' }), () =>
+      navigate('/routes?back=progress'),
+    ),
+  ]);
+
   // Easy-run effort by weekday: the evidence that decides whether the Tuesday
   // run (the day after legs) stays on Tuesday (SYNTHESIS §4.3).
   const byDay = easyRunEffortByWeekday(sessions).filter((r) => r.meanRpe != null || r.talkNegativePct != null);
