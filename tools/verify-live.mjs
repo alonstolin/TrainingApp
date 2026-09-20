@@ -133,6 +133,9 @@ program.goalKm === 10 && program.days === 5 && program.corePhases === 3
 
 // --- a real logging round-trip against production
 await page.locator('button.btn--xl').first().click();
+// Pull-up days ask for bodyweight before the session opens.
+const useBw = page.locator('.sheet button', { hasText: 'Use this weight' });
+if (await useBw.isVisible().catch(() => false)) await useBw.click();
 await page.waitForSelector('.screen--session');
 const plus = page.locator('.stepper button', { hasText: '+' }).first();
 for (let i = 0; i < 8; i++) await plus.click();
