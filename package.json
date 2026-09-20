@@ -5,7 +5,7 @@
   "type": "module",
   "description": "Offline PWA for a strength + hypertrophy + 10K running program. Zero runtime dependencies — devDependencies are for testing only and are never shipped.",
   "scripts": {
-    "test": "node --test tests/unit/",
+    "test": "node --test \"tests/unit/**/*.test.mjs\"",
     "test:e2e": "playwright test",
     "serve": "node tools/serve.mjs",
     "build:sw": "node tools/gen-sw-manifest.mjs",

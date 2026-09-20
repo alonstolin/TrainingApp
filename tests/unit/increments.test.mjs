@@ -39,7 +39,7 @@ test('bad input resets rather than throwing', () => {
   setIncrementOverrides({ ohp: 5 });
   setIncrementOverrides(null);
   assert.deepEqual(getIncrementOverrides(), {});
-  assert.equal(getExercise('ohp').increment, 2.5);
+  assert.equal(getExercise('ohp').increment, 1.25);
 });
 
 test('a custom increment changes what loads get SUGGESTED, not just the buttons', () => {

@@ -16,7 +16,8 @@
  */
 
 import { addDays, dayOfWeek, daysBetween, trainingDate, startOfWeek } from './dates.js';
-import { deriveCursors } from './schedule.js';
+import { deriveCursors, mesoState, thursdayRest } from './schedule.js';
+import { corePhaseFor } from './prescribe.js';
 
 const trackOf = (key) =>
   key.startsWith('lift:') ? 'lift' : key.startsWith('run:') ? 'run' : 'core';
@@ -40,21 +41,10 @@ export function slotLabel(program, key, ctx = {}) {
     return { name: 'Easy Run', short: 'Easy', focus: target, target, isDown: !!wk?.down };
   }
   if (key === 'core') {
-    const phase =
-      [...program.corePhases].reverse().find((p) => (ctx.coreCompleted ?? 0) >= p.afterSessions) ??
-      program.corePhases[0];
+    const phase = corePhaseFor(program, ctx.coreCompleted ?? 0);
     return { name: `Core — Phase ${phase.phase}`, short: 'Core', focus: phase.name, phase: phase.phase };
   }
   return { name: key, short: '?', focus: '' };
-}
-
-/** Mesocycle week and block from a completed-lift count. */
-function mesoAt(program, liftCompleted) {
-  const perBlock = program.liftsPerWeek * program.mesocycleWeeks;
-  return {
-    mesocycle: Math.floor(liftCompleted / perBlock) + 1,
-    weekInMeso: (Math.floor(liftCompleted / program.liftsPerWeek) % program.mesocycleWeeks) + 1,
-  };
 }
 
 /**
@@ -83,13 +73,26 @@ export function buildCalendar(state, program, range) {
   }
 
   // Forward simulation starts from where the cursors actually are right now.
-  const cursors = deriveCursors(state.sessions ?? [], program);
+  // The mesocycle position is re-derived on every simulated day from the
+  // simulated lift and long-run DATES, through the same mesoState() the Today
+  // screen uses — so a projected deload lands where the engine will put it.
+  const cursors = deriveCursors(state.sessions ?? [], program, { meta: state.meta, today });
+  const completedLiftDates = (state.sessions ?? [])
+    .filter((s) => s.status === 'completed' && s.kind === 'lift' && s.dayKey !== 'lift:E')
+    .map((s) => s.date)
+    .sort();
+  const completedLongDates = (state.sessions ?? [])
+    .filter((s) => s.status === 'completed' && s.kind === 'run' && s.variant === 'long')
+    .map((s) => s.date)
+    .sort();
   const sim = {
     liftPos: cursors.lift.position,
-    liftCompleted: cursors.lift.completed,
-    longCompleted: cursors.run.longCompleted,
+    liftDates: completedLiftDates,
+    longRunDates: completedLongDates,
     coreCompleted: cursors.core.completed,
   };
+  const mesoOn = (date) =>
+    mesoState(program, { liftDates: sim.liftDates, longRunDates: sim.longRunDates, date, meta: state.meta });
 
   // Anything already settled TODAY has consumed today's slots, so the forecast
   // must not offer them again — same track-budget logic the Today screen uses.
@@ -176,10 +179,18 @@ export function buildCalendar(state, program, range) {
         // Optional slots never advance the simulation — taking the bonus day must
         // not shift the rest of the plan.
         if (slot.optional) {
-          const label = slotLabel(program, slot.key, { runWeek: sim.longCompleted + 1, coreCompleted: sim.coreCompleted });
+          const runWeek = sim.longRunDates.length + 1;
+          const label = slotLabel(program, slot.key, { runWeek, coreCompleted: sim.coreCompleted });
+          // The bonus day only exists in probe weeks; Thursday reads as rest in
+          // the test week and once the long run is ≥ 8 km (SYNTHESIS §3.5, §5.5).
+          const m = mesoOn(date);
+          const dayDef = slot.key.startsWith('lift:') ? program.liftDays[slot.key.split(':')[1]] : null;
+          if (dayDef?.allowedRoles && !dayDef.allowedRoles.includes(m.role)) continue;
+          const restDefault = thursdayRest(program, { role: m.role, run: { week: runWeek } }, date);
           entries.push({
             status: 'projected', track, key: slot.key, optional: true,
-            name: label.name, short: label.short, detail: label.focus, projected: true,
+            name: label.name, short: label.short, detail: restDefault ? 'rest by default' : label.focus, projected: true,
+            restByDefault: restDefault,
           });
           continue;
         }
@@ -190,14 +201,14 @@ export function buildCalendar(state, program, range) {
 
         if (track === 'lift') {
           key = program.liftCycle[sim.liftPos % program.liftCycle.length];
-          const m = mesoAt(program, sim.liftCompleted);
-          extra = { ...m, isDeload: m.weekInMeso === program.deloadWeek };
+          const m = mesoOn(date);
+          extra = { mesocycle: m.mesocycle, weekInMeso: m.weekInMeso, blockLength: m.blockLength, role: m.role, isDeload: m.isDeload };
           sim.liftPos++;
-          sim.liftCompleted++;
+          sim.liftDates = [...sim.liftDates, date];
         } else if (track === 'run') {
-          ctx = { runWeek: sim.longCompleted + 1 };
+          ctx = { runWeek: sim.longRunDates.length + 1 };
           extra = { runWeek: ctx.runWeek };
-          if (key === 'run:long') sim.longCompleted++;
+          if (key === 'run:long') sim.longRunDates = [...sim.longRunDates, date];
         } else {
           ctx = { coreCompleted: sim.coreCompleted };
           sim.coreCompleted++;
@@ -237,8 +248,8 @@ export function buildCalendar(state, program, range) {
  * Returns null once it has already been run.
  */
 export function projectGoalDate(state, program, today = trainingDate()) {
-  const goalWeek = program.runPlan[program.runPlan.length - 1];
-  const cursors = deriveCursors(state.sessions ?? [], program);
+  const goalWeek = program.runPlan.find((w) => w.goal) ?? program.runPlan[program.runPlan.length - 1];
+  const cursors = deriveCursors(state.sessions ?? [], program, { meta: state.meta, today });
   if (cursors.run.longCompleted >= program.runPlan.length) return null;
 
   const days = buildCalendar(state, program, {

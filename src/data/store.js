@@ -14,11 +14,12 @@
 
 import * as db from './db.js';
 import { newId } from '../core/ids.js';
-import { trainingDate } from '../core/dates.js';
+import { trainingDate, startOfWeek } from '../core/dates.js';
 import { DEFAULT_META, SCHEMA_VERSION } from '../core/schema.js';
-import { CURRENT_PROGRAM } from '../program/index.js';
-import { deriveCursors } from '../core/schedule.js';
-import { backoffLoad } from '../core/progression.js';
+import { CURRENT_PROGRAM, PROGRAMS } from '../program/index.js';
+import { deriveCursors, makeHistoryLookup } from '../core/schedule.js';
+import { resolveBlock, weekModifier } from '../core/prescribe.js';
+import { backoffLoad, loadFromReference, e1rm, effectiveLoad } from '../core/progression.js';
 import { getExercise, setIncrementOverrides } from '../program/exercises.js';
 
 const PERSIST_DEBOUNCE_MS = 250;
@@ -75,11 +76,17 @@ function rebuildIndex() {
         sets: entry.sets,
         bodyweightKg: s.bodyweightKg,
         startedAt: s.startedAt,
-        // Both drive progression filtering; see makeHistoryLookup in core/schedule.js.
+        // All drive progression filtering; see makeHistoryLookup in core/schedule.js.
         // dayKey keeps heavy and volume exposures of the same lift from reading
-        // each other's sets; isDeload keeps deloads from becoming the new baseline.
+        // each other's sets; isDeload keeps deloads from becoming the new baseline;
+        // role lets a test-week probe seed the NEXT block's reference; gym and
+        // station keep one cable stack's numbers from being read as another's.
         dayKey: s.dayKey,
         isDeload: !!s.programRef?.isDeload,
+        role: s.programRef?.role ?? null,
+        programVersion: s.programRef?.version ?? null,
+        gymId: s.gymId ?? null,
+        station: entry.station ?? null,
       });
     }
   }
@@ -95,7 +102,45 @@ export function historyFor(exerciseId, n = 10) {
   return (state.index.get(exerciseId) ?? []).slice(0, n);
 }
 
-export const cursors = () => deriveCursors(state.sessions, CURRENT_PROGRAM);
+export const cursors = () =>
+  deriveCursors(state.sessions, CURRENT_PROGRAM, { meta: state.meta, today: trainingDate() });
+
+/** Record a bodyweight reading: current value plus the dated log the drift flag reads. */
+export function logBodyweight(kg, date = trainingDate()) {
+  if (!Number.isFinite(kg)) return;
+  const log = (state.meta.bodyweightLog ?? []).filter((r) => r.date !== date);
+  log.push({ date, kg });
+  log.sort((a, b) => (a.date < b.date ? -1 : 1));
+  setMeta({ bodyweightKg: kg, bodyweightLog: log.slice(-400) });
+}
+
+/**
+ * One-time v3 entry marker (SYNTHESIS §4.4). Written at the first boot on a
+ * program with `blocks`, from the state of the log at that moment:
+ *  - runWeekAtStart: the run week as of Monday of this week, so the block
+ *    boundaries line up with the calendar week the athlete is in
+ *  - deloadFirst: v2 was in week ≥ 3, so a deload precedes the probe week
+ */
+function stampProgramStart() {
+  if (!CURRENT_PROGRAM.blocks || state.meta.v3StartedAt) return;
+  const today = trainingDate();
+  const weekStart = startOfWeek(today);
+  const settled = state.sessions.filter((s) => s.status === 'completed');
+  const lifts = settled.filter((s) => s.kind === 'lift' && s.dayKey !== 'lift:E');
+  const longBefore = settled.filter((s) => s.kind === 'run' && s.variant === 'long' && s.date < weekStart).length;
+  const legacy = PROGRAMS[2];
+  const v2 = legacy && !legacy.blocks ? deriveCursors(state.sessions, legacy, { today }) : null;
+  state.meta.v3StartedAt = {
+    date: today,
+    weekStart,
+    runWeekAtStart: longBefore + 1,
+    liftCompleted: lifts.length,
+    deloadFirst: !!(v2 && lifts.length > 0 && v2.weekInMeso >= 3 && !v2.isDeload),
+  };
+  state.meta.programVersion = CURRENT_PROGRAM.version;
+  metaDirty = true;
+  schedulePersist();
+}
 
 // ---------------------------------------------------------------------------
 // Persistence
@@ -204,6 +249,7 @@ export async function init() {
   }
 
   rebuildIndex();
+  stampProgramStart();
   state.ready = true;
   state.storage = await db.requestPersistence();
   notify();
@@ -213,6 +259,36 @@ export async function init() {
 // ---------------------------------------------------------------------------
 // Session lifecycle
 // ---------------------------------------------------------------------------
+
+/** A logged-session entry from a resolved prescription entry. */
+function entryFromPlanned(e, entryId, order) {
+  return {
+    entryId,
+    exerciseId: e.exerciseId,
+    order: e.order ?? order,
+    group: e.group ?? null,
+    station: e.station ?? null,
+    swappedFrom: e.swappedFrom ?? null,
+    sets: (e.plannedSets ?? []).map((p, j) => ({
+      setId: `s${j}`,
+      index: j,
+      type: p.type ?? 'work',
+      weightKg: p.weightKg ?? null,
+      reps: null,
+      seconds: null,
+      rpe: null,
+      targetReps: p.targetReps ?? null,
+      targetSeconds: p.targetSeconds ?? null,
+      rpeTarget: p.rpeTarget ?? null,
+      derivedFromTop: p.derivedFromTop ?? false,
+      pctOfTop: p.pctOfTop ?? null,
+      derivedFromReference: p.derivedFromReference ?? false,
+      pctOfReference: p.pctOfReference ?? null,
+      done: false,
+      ts: null,
+    })),
+  };
+}
 
 /**
  * Create a session from a resolved prescription and store the prescription
@@ -233,42 +309,24 @@ export function startSession(resolved, opts = {}) {
     kind: resolved.kind,
     dayKey: resolved.dayKey,
     variant: resolved.variant ?? null,
+    gymId: opts.gymId ?? resolved.gymId ?? null,
     programRef: {
       programId: CURRENT_PROGRAM.programId,
       version: CURRENT_PROGRAM.version,
       dayKey: resolved.dayKey,
       mesocycle: opts.mesocycle ?? null,
       week: resolved.weekInMeso ?? null,
+      role: resolved.role ?? null,
       isDeload: !!resolved.isDeload,
       runWeek: resolved.runWeek ?? null,
-      corePhase: resolved.phase ?? null,
+      corePhase: resolved.phase ?? resolved.corePhase ?? null,
     },
     prescriptionSnapshot: resolved,
     bodyweightKg: opts.bodyweightKg ?? state.meta.bodyweightKg ?? null,
-    entries: (resolved.entries ?? []).map((e, i) => ({
-      entryId: `e${i}`,
-      exerciseId: e.exerciseId,
-      order: e.order ?? i,
-      sets: (e.plannedSets ?? []).map((p, j) => ({
-        setId: `s${j}`,
-        index: j,
-        type: p.type ?? 'work',
-        weightKg: p.weightKg ?? null,
-        reps: null,
-        seconds: null,
-        rpe: null,
-        targetReps: p.targetReps ?? null,
-        targetSeconds: p.targetSeconds ?? null,
-        rpeTarget: p.rpeTarget ?? null,
-        derivedFromTop: p.derivedFromTop ?? false,
-        pctOfTop: p.pctOfTop ?? null,
-        done: false,
-        ts: null,
-      })),
-    })),
+    entries: (resolved.entries ?? []).map((e, i) => entryFromPlanned(e, `e${i}`, i)),
     run:
       resolved.kind === 'run'
-        ? { distanceKm: null, durationSec: null, effort: null, notes: '' }
+        ? { distanceKm: null, durationSec: null, effort: null, talkTest: null, notes: '' }
         : null,
     notes: '',
     feeling: null,
@@ -334,6 +392,34 @@ export function logSet(sessionId, entryId, setId, values) {
           }
         }
       }
+
+      // v3: the probe establishes the block reference on the first heavy session
+      // of a block, and a probe at ≤ RPE 8 that beats the reference raises it.
+      // Either way the back-offs not yet performed follow (SYNTHESIS §1.1). A
+      // harder-than-planned probe changes nothing — the dose is protected.
+      if (set.type === 'probe' && set.reps) {
+        const ex = getExercise(entry.exerciseId);
+        const idx = s.entries.indexOf(entry);
+        const snapEntry = s.prescriptionSnapshot?.entries?.[idx];
+        const current = snapEntry?.reference?.e1rm ?? null;
+        const probeE1 = e1rm(effectiveLoad(set, ex, s.bodyweightKg), set.reps, set.rpe);
+        const beats = current == null || ((set.rpe == null || set.rpe <= 8) && probeE1 > current);
+        if (beats && probeE1 > 0) {
+          if (snapEntry) {
+            snapEntry.reference = {
+              e1rm: Math.round(probeE1 * 10) / 10,
+              source: current == null ? 'probe' : 'probe-raise',
+              date: s.date,
+              pct: snapEntry.reference?.pct ?? entry.sets.find((x) => x.pctOfReference)?.pctOfReference ?? 0.8,
+            };
+          }
+          for (const other of entry.sets) {
+            if (other.derivedFromReference && !other.done) {
+              other.weightKg = loadFromReference(probeE1, other.pctOfReference ?? 0.8, ex, s.bodyweightKg);
+            }
+          }
+        }
+      }
     },
     { immediate: true },
   );
@@ -368,6 +454,114 @@ export function addSet(sessionId, entryId) {
       ts: null,
     });
   });
+}
+
+/**
+ * Re-resolve ONE entry of an in-progress lift session — a substitution or a
+ * station change — against the new exercise's own history. Only allowed while
+ * nothing has been logged on it: after a set exists the honest move is to add a
+ * second entry, not rewrite the first.
+ *
+ * @param over { exerciseId?, station? }
+ */
+export function reresolveEntry(sessionId, entryId, over = {}) {
+  return updateSession(sessionId, (s) => {
+    if (s.status !== 'in_progress' || s.kind !== 'lift') return;
+    const idx = s.entries.findIndex((e) => e.entryId === entryId);
+    if (idx < 0) return;
+    const entry = s.entries[idx];
+    if (entry.sets.some((x) => x.done)) return;
+    const snap = s.prescriptionSnapshot;
+    const snapEntry = snap?.entries?.[idx];
+    if (!snapEntry) return;
+
+    const program = CURRENT_PROGRAM;
+    const letter = (s.dayKey ?? '').split(':')[1];
+    const day = program.liftDays?.[letter] ?? null;
+    // The block this entry came from: by original exercise for programmed
+    // blocks, by phase for attached core work.
+    const original = snapEntry.swappedFrom ?? entry.swappedFrom ?? snapEntry.exerciseId;
+    let block = day?.blocks.find((b) => b.exerciseId === original) ?? null;
+    if (!block && snapEntry.group === 'core') {
+      for (const phase of program.core?.phases ?? program.corePhases ?? []) {
+        const b = phase.blocks.find((x) => x.exerciseId === original);
+        if (b) block = { ...b, group: 'core' };
+      }
+    }
+    if (!block) return;
+
+    const byRole = program.weekModifiers.some((w) => w.role);
+    const mod = weekModifier(program, byRole ? (snap.role ?? 'probe') : (snap.weekInMeso ?? 1));
+    const resolved = resolveBlock(
+      program,
+      block,
+      {
+        dayKey: s.dayKey,
+        mod,
+        day,
+        historyFor: makeHistoryLookup(state.sessions, state.index),
+        bodyweightKg: s.bodyweightKg,
+        raceWeek: snap.raceWeek ?? null,
+        gymId: s.gymId ?? null,
+        order: snapEntry.order ?? idx,
+      },
+      {
+        exerciseId: over.exerciseId ?? entry.exerciseId,
+        station: over.station === undefined ? (entry.station ?? null) : over.station,
+      },
+    );
+    // A swap back to the programmed exercise is not a swap.
+    if (resolved.exerciseId === block.exerciseId) resolved.swappedFrom = null;
+    snap.entries[idx] = resolved;
+    s.entries[idx] = entryFromPlanned(resolved, entry.entryId, entry.order);
+  });
+}
+
+/** Append an exercise to an in-progress lift session ("do this as well"). */
+export function addEntry(sessionId, exerciseId, { sets = 3, repMin = 8, repMax = 12, rpeCap = 9 } = {}) {
+  return updateSession(sessionId, (s) => {
+    if (s.status !== 'in_progress' || s.kind !== 'lift') return;
+    const snap = s.prescriptionSnapshot;
+    const byRole = CURRENT_PROGRAM.weekModifiers.some((w) => w.role);
+    const mod = weekModifier(CURRENT_PROGRAM, byRole ? (snap?.role ?? 'probe') : (snap?.weekInMeso ?? 1));
+    const ex = getExercise(exerciseId);
+    const block =
+      ex.metric === 'time'
+        ? { exerciseId, scheme: 'time', sets: 2, seconds: 30, restSec: 45 }
+        : ex.metric === 'weight_time'
+          ? { exerciseId, scheme: 'weight_time', sets: 2, seconds: 40, restSec: 45 }
+          : ex.metric === 'reps'
+            ? { exerciseId, scheme: 'reps', sets, repMin, repMax, restSec: 60 }
+            : { exerciseId, scheme: 'double_progression', sets, repMin, repMax, rpeCap, restSec: 90 };
+    const order = s.entries.length;
+    const resolved = resolveBlock(
+      CURRENT_PROGRAM,
+      block,
+      {
+        dayKey: s.dayKey,
+        mod,
+        day: null,
+        historyFor: makeHistoryLookup(state.sessions, state.index),
+        bodyweightKg: s.bodyweightKg,
+        gymId: s.gymId ?? null,
+        order,
+      },
+    );
+    resolved.added = true;
+    if (snap) snap.entries = [...(snap.entries ?? []), resolved];
+    const entry = entryFromPlanned(resolved, `e${order}-${Date.now().toString(36)}`, order);
+    entry.added = true;
+    s.entries.push(entry);
+  });
+}
+
+/** Change which gym an in-progress session is at; remembered for next time. */
+export function setSessionGym(sessionId, gymId) {
+  const r = updateSession(sessionId, (s) => {
+    s.gymId = gymId ?? null;
+  });
+  setMeta({ lastGymId: gymId ?? null });
+  return r;
 }
 
 export function removeSet(sessionId, entryId, setId) {

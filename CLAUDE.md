@@ -13,7 +13,7 @@ README.md carries the program design, the research behind it, and the rationale 
 ```bash
 npm test                                   # unit tests (node --test, no browser)
 node --test tests/unit/schedule.test.mjs   # one unit file
-node --test --test-name-pattern="deload" tests/unit/   # tests matching a name
+node --test --test-name-pattern="deload" "tests/unit/**/*.test.mjs"   # tests matching a name
 npm run test:e2e                           # Playwright, WebKit + iPhone 14 emulation; starts its own server
 npx playwright test tests/e2e/sheet.spec.js            # one e2e file
 npx playwright test -g "swiping"                       # e2e tests matching a name
@@ -37,7 +37,15 @@ Everything hard lives here — schedule, prescription, progression, stats, calen
 
 ### The program is static, versioned content
 
-`src/program/program.v1.js` is never written at runtime. Every logged session freezes its own `prescriptionSnapshot` plus the program version it ran under, so the program can be edited freely without rewriting what past sessions said to do. **Bump `version` on any edit.** Exercises are referenced by permanent `id` slug — never rename or delete one; set `retired: true`.
+`src/program/program.v3.js` is the current program and is never written at runtime; `program.v1.js` carries `version: 2` and stays as the record old sessions ran under (`PROGRAMS` in `program/index.js`). Every logged session freezes its own `prescriptionSnapshot` plus the program version it ran under, so the program can be edited freely without rewriting what past sessions said to do. **Bump `version` on any edit.** Exercises are referenced by permanent `id` slug — never rename or delete one; set `retired: true`. The spec the program implements is `research/SYNTHESIS.md`; program changes go through the research agents in `.claude/agents/` first (Sonnet researchers, Opus reviewer).
+
+### v3 engine invariants
+
+- **Heavy days are `probe_backoff`**: the probe is a measurement, the three back-offs at 80% of a block-reference e1RM are the dose. `blockReference()` in `core/progression.js` folds the heavy-day history (rows carry `role` and `isDeload`); the reference only moves on evidence, and a back-off raise is anchored on the load actually lifted so the bar moves by exactly one step after rounding. `tests/unit/reference.test.mjs` pins every rule, and `prescribe.test.mjs` asserts every generated back-off's implied RPE lies in [6.5, 8.5] — the reviewer's blocker. Pull-ups compute everything on system mass (`loadFromReference` hands back the belt load).
+- **Week modifiers are keyed by role** (`probe` | `test` | `deload`), not week number. `mesoState()` in `core/schedule.js` derives the role: during the 10K build the lifting week is the run week as of Monday, deloads land on the running down-weeks, and a 14-day gap in long runs falls back to the lift count. The calendar's forward simulation calls the same function, so Today and Calendar cannot disagree. `meta.v3StartedAt` is the one-time entry marker written by `store.init`.
+- **Core is attached at resolution** to the days in `program.core.attachTo` as entries with `group: 'core'`; `coreCompleted` counts any completed session with logged core work (`hasCoreWork`). The lift logger is metric-aware per entry (`weight_reps` | `reps` | `time` | `weight_time`); there is no separate core logger.
+- **`resolveBlock()`** resolves one block and is what `store.reresolveEntry` uses for substitutions and station changes — keep it the only place a block becomes planned sets.
+- **`sessionIntegrity()`** (`core/schema.js`) is read-only and strict only against the program version the session ran under.
 
 ### The schedule is cursor-driven, not calendar-driven
 
@@ -65,10 +73,12 @@ Cache-first, precache-everything, `updateViaCache: 'none'` (GitHub Pages serves 
 - Bottom sheets (`src/ui/sheet.js`) dismiss by swipe, backdrop tap or Escape. Sheets live in `#sheet-host` outside `#app`, so any handler that navigates **must close the sheet first** or its backdrop swallows every subsequent tap.
 - Screens export `mount(root, params)` and return `{ unmount }`; register teardown via `ctx.onTeardown` for anything the router can't see (GPS watches, wake locks).
 - Charts never use a dual y-axis, and never plot two different kinds of thing on one line — heavy and volume lift exposures, easy and long runs, are separate series.
+- Sheets do not nest: opening a sheet clears `#sheet-host`. A stepper inside a sheet must pass `allowKeypad: false` or its keypad replaces the sheet it sits in.
 
 ### Testing notes
 
 - Under WebKit touch emulation `page.mouse` produces **no events**; drag gestures in e2e tests dispatch real `PointerEvent`s (see `sheet.spec.js`).
 - GPS tests stub `navigator.geolocation.watchPosition` via `addInitScript`. Fix timestamps must advance at a plausible pace — `core/geo.js` rejects implausible speeds, so emitting 9m-apart fixes 20ms apart looks like teleporting and every point is (correctly) dropped.
 - `tests/unit/geo-accuracy.test.mjs` simulates runs with **autocorrelated** GPS error and asserts recorded distance against a known truth. White noise would overstate the problem and flatter any filter; a 400m track is included because over-smoothing shows up there as under-reporting.
-- `tests/unit/_fixtures.mjs` has session/set builders and the loaded program.
+- `tests/unit/_fixtures.mjs` has session/set builders and the loaded program (`program` is v3, `v2` the legacy file).
+- e2e specs that start a pull-up day must accept the bodyweight sheet first (`acceptBodyweight` helpers in the specs). Seeding lifts programmatically goes through `store.cursors()` for the role and `resolveSession` with `{ role, coreCompleted, historyFor, bodyweightKg }` — see `deload.spec.js`.

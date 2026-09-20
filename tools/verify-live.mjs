@@ -124,7 +124,7 @@ const program = await page.evaluate(async () => {
     days: Object.keys(CURRENT_PROGRAM.liftDays).length,
     runWeeks: CURRENT_PROGRAM.runPlan.length,
     goalKm: CURRENT_PROGRAM.runPlan.at(-1).long.km,
-    corePhases: CURRENT_PROGRAM.corePhases.length,
+    corePhases: (CURRENT_PROGRAM.core?.phases ?? CURRENT_PROGRAM.corePhases).length,
   };
 });
 program.goalKm === 10 && program.days === 5 && program.corePhases === 3

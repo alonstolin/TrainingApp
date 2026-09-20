@@ -7,6 +7,8 @@ const boot = async (page) => {
 
 const startFirstSession = async (page) => {
   await page.locator('button.btn--xl').first().click();
+  const use = page.locator('.sheet button', { hasText: 'Use this weight' });
+  if (await use.isVisible().catch(() => false)) await use.click();
   await expect(page.locator('.screen--session')).toBeVisible();
 };
 
@@ -37,8 +39,15 @@ test('stepping from a decimal keeps the offset instead of snapping', async ({ pa
   await page.locator('.sheet button', { hasText: /^Set$/ }).click();
   await expect(page.locator('.stepper-num').first()).toHaveText('6.25');
 
+  // The step is whatever this exercise's increment is (1.25 for the pull-up
+  // that opens Lower) — the point is that it moves FROM 6.25, not onto a grid.
+  const step = await page.evaluate(async () => {
+    const store = await import('./src/data/store.js');
+    const { getExercise } = await import('./src/program/exercises.js');
+    return getExercise(store.activeSession().entries[0].exerciseId).increment;
+  });
   await page.locator('.stepper button', { hasText: '+' }).first().click();
-  await expect(page.locator('.stepper-num').first()).toHaveText('8.75');
+  await expect(page.locator('.stepper-num').first()).toHaveText(String(6.25 + step));
   await page.locator('.stepper button', { hasText: '−' }).first().click();
   await expect(page.locator('.stepper-num').first()).toHaveText('6.25');
 });

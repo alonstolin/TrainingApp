@@ -25,7 +25,7 @@
  *               sessions can never fake your way into a deload.
  */
 
-import { dayOfWeek, addDays, daysBetween, trainingDate } from './dates.js';
+import { dayOfWeek, addDays, daysBetween, trainingDate, startOfWeek } from './dates.js';
 import { resolveSession, weekModifier } from './prescribe.js';
 import { getExercise } from '../program/exercises.js';
 
@@ -35,30 +35,181 @@ const LOOKBACK_CAP_DAYS = 60; // ceiling on the missed-slot walk
 const isSettled = (s) => s.status === 'completed' || s.status === 'skipped';
 
 /**
+ * Did this completed session include core work? v3 attaches core to the end of
+ * two lift days, so "a core session" is any completed session with at least one
+ * logged set in a core-group entry — standalone or attached.
+ */
+export const hasCoreWork = (s) =>
+  s.status === 'completed' &&
+  (s.kind === 'core' ||
+    (s.entries ?? []).some((e) => e.group === 'core' && (e.sets ?? []).some((x) => x.done)));
+
+const roleOf = (weekInMeso, blockLength) =>
+  weekInMeso >= blockLength ? 'deload' : weekInMeso === blockLength - 1 ? 'test' : 'probe';
+
+/**
+ * Where the lifting mesocycle stands. Pure; also drives the calendar's forward
+ * simulation, so the Today screen and the Calendar tab can never disagree.
+ *
+ * v2 programs (no `blocks`): a fixed-length block on a lift-count clock.
+ *
+ * v3 programs, SYNTHESIS §4.4:
+ *  - ENTRY — the first `liftsPerWeek` lifts after v3 start are a deload when v2
+ *    was in week ≥ 3 at that moment (`meta.v3StartedAt.deloadFirst`).
+ *  - BUILD — while the run plan is in progress AND a long run was completed in
+ *    the last 14 days, the lifting week IS the run week as of Monday of the
+ *    current week (so Sunday's lift stays in Monday's week). Lifting deloads
+ *    land on the running down-weeks, except a down-week with fewer than
+ *    `minLoadingWeeks` loading weeks before it, which is skipped. The week
+ *    before each deload is the test week.
+ *  - FALLBACK / POST — no long run for 14 days, or the build is over: a
+ *    lift-count clock continues from the last run-derived position (or from
+ *    the end of the build), in blocks of `fallbackWeeks` / `post.weeks`.
+ *
+ * @param {{liftDates:string[], longRunDates:string[], date:string, meta?:object}} o
+ *        liftDates: completed non-optional lift dates, ascending
+ *        longRunDates: completed long-run dates, ascending
+ */
+export function mesoState(program, { liftDates = [], longRunDates = [], date, meta } = {}) {
+  const perWeek = program.liftsPerWeek;
+  const liftCompleted = liftDates.length;
+
+  if (!program.blocks) {
+    const weeks = program.mesocycleWeeks;
+    const weekInMeso = (Math.floor(liftCompleted / perWeek) % weeks) + 1;
+    const mod = program.weekModifiers.find((w) => w.week === weekInMeso);
+    return {
+      mesocycle: Math.floor(liftCompleted / (perWeek * weeks)) + 1,
+      weekInMeso,
+      blockLength: weeks,
+      role: mod?.deload ? 'deload' : roleOf(weekInMeso, weeks),
+      isDeload: !!mod?.deload,
+      source: 'lifts',
+    };
+  }
+
+  const build = program.blocks.build;
+  const start = meta?.v3StartedAt ?? { liftCompleted: 0, runWeekAtStart: 1, deloadFirst: false, weekStart: null };
+  const liftsSince = Math.max(0, liftCompleted - (start.liftCompleted ?? 0));
+  if (start.deloadFirst && liftsSince < perWeek) {
+    return { mesocycle: 1, weekInMeso: 1, blockLength: 1, role: 'deload', isDeload: true, source: 'entry-deload' };
+  }
+
+  // Deload run weeks: the plan's down-weeks after v3 start, each needing enough
+  // loading weeks before it.
+  const boundary0 = (start.runWeekAtStart ?? 1) - 1 + (start.deloadFirst ? 1 : 0);
+  const deloads = [];
+  let prev = boundary0;
+  for (const w of build.deloadOnRunWeeks) {
+    if (w <= prev) continue;
+    if (w - prev - 1 >= build.minLoadingWeeks) {
+      deloads.push(w);
+      prev = w;
+    }
+  }
+  const lastDeloadRunWeek = build.deloadOnRunWeeks[build.deloadOnRunWeeks.length - 1];
+
+  /** Run-derived position for a run week inside the build. */
+  const runDerived = (r) => {
+    const rr = Math.max(r, boundary0 + 1);
+    const prevDeload = [...deloads].reverse().find((w) => w < rr) ?? boundary0;
+    // No qualifying deload ahead means the build's last down-week closes the block.
+    const nextDeload = deloads.find((w) => w >= rr) ?? Math.max(lastDeloadRunWeek, rr);
+    const blockLength = nextDeload - prevDeload;
+    const weekInMeso = rr - prevDeload;
+    return {
+      mesocycle: deloads.filter((w) => w < rr).length + 1,
+      weekInMeso,
+      blockLength,
+      role: roleOf(weekInMeso, blockLength),
+      runWeek: rr,
+    };
+  };
+
+  const runWeekNow = longRunDates.length + 1;
+  const inBuild = runWeekNow <= lastDeloadRunWeek;
+  const lastLong = longRunDates[longRunDates.length - 1] ?? null;
+  const fresh =
+    lastLong != null && date != null && daysBetween(lastLong, date) <= (program.blocks.staleLongRunDays ?? 14);
+
+  if (inBuild && fresh) {
+    const weekStart = startOfWeek(date);
+    const r = 1 + longRunDates.filter((d) => d < weekStart).length;
+    const pos = runDerived(r);
+    return { ...pos, isDeload: pos.role === 'deload', source: 'run' };
+  }
+
+  // ---- lift-count clock, continuing from the last run-derived position
+  const anchorLong = inBuild ? lastLong : (longRunDates[lastDeloadRunWeek - 1] ?? lastLong);
+  let anchorMonday = null;
+  let at; // position at the anchor
+  if (anchorLong) {
+    anchorMonday = addDays(startOfWeek(anchorLong), 7);
+    if (inBuild) {
+      at = runDerived(longRunDates.length + 1);
+    } else if (date != null && date < anchorMonday) {
+      // The final down-week's long run is banked but its week is not over —
+      // Sunday's lift is still part of the deload.
+      const pos = runDerived(lastDeloadRunWeek);
+      return { ...pos, isDeload: pos.role === 'deload', source: 'run' };
+    } else {
+      // The build's final deload has passed; post blocks start fresh.
+      at = { mesocycle: deloads.length + 1, weekInMeso: 1, blockLength: program.blocks.post.weeks };
+    }
+  } else {
+    at = { mesocycle: 1, weekInMeso: 1, blockLength: build.fallbackWeeks };
+  }
+  const weeks = inBuild ? build.fallbackWeeks : program.blocks.post.weeks;
+  const liftsAfter = anchorMonday
+    ? liftDates.filter((d) => d >= anchorMonday).length
+    : liftsSince - (start.deloadFirst ? perWeek : 0);
+  const w = at.weekInMeso + Math.floor(Math.max(0, liftsAfter) / perWeek);
+
+  let pos;
+  if (w <= at.blockLength) {
+    pos = { mesocycle: at.mesocycle, weekInMeso: w, blockLength: at.blockLength };
+  } else {
+    const rem = w - at.blockLength - 1;
+    pos = {
+      mesocycle: at.mesocycle + 1 + Math.floor(rem / weeks),
+      weekInMeso: (rem % weeks) + 1,
+      blockLength: weeks,
+    };
+  }
+  const role = roleOf(pos.weekInMeso, pos.blockLength);
+  return { ...pos, role, isDeload: role === 'deload', source: inBuild ? 'lifts' : 'post' };
+}
+
+/**
  * Rebuild all cursors from the session log.
  * Optional bonus sessions (lift:E) are deliberately excluded from the lift cycle —
  * doing an extra arm day must not push you on to the next programmed session.
+ *
+ * @param {{meta?:object, today?:string}} opts — meta carries the v3 entry marker;
+ *        today anchors the run-derived lifting week to the current calendar week.
  */
-export function deriveCursors(sessions, program) {
+export function deriveCursors(sessions, program, opts = {}) {
+  const today = opts.today ?? trainingDate();
   const settled = sessions.filter(isSettled);
 
   const lifts = settled.filter((s) => s.kind === 'lift' && s.dayKey !== 'lift:E');
   const liftPosition = lifts.length;
-  const liftCompleted = lifts.filter((s) => s.status === 'completed').length;
+  const liftDates = lifts.filter((s) => s.status === 'completed').map((s) => s.date).sort();
+  const liftCompleted = liftDates.length;
 
   const runs = settled.filter((s) => s.kind === 'run');
-  const longCompleted = runs.filter(
-    (s) => s.variant === 'long' && s.status === 'completed',
-  ).length;
+  const longRunDates = runs
+    .filter((s) => s.variant === 'long' && s.status === 'completed')
+    .map((s) => s.date)
+    .sort();
+  const longCompleted = longRunDates.length;
   const easyCompleted = runs.filter(
     (s) => s.variant === 'easy' && s.status === 'completed',
   ).length;
 
-  const coreCompleted = settled.filter(
-    (s) => s.kind === 'core' && s.status === 'completed',
-  ).length;
+  const coreCompleted = settled.filter(hasCoreWork).length;
 
-  const perBlock = program.liftsPerWeek * program.mesocycleWeeks;
+  const meso = mesoState(program, { liftDates, longRunDates, date: today, meta: opts.meta });
 
   return {
     lift: {
@@ -69,15 +220,46 @@ export function deriveCursors(sessions, program) {
     run: {
       longCompleted,
       easyCompleted,
+      lastLongDate: longRunDates[longRunDates.length - 1] ?? null,
       // The run week advances only when that week's long run is banked. This is
       // what structurally enforces the "no single-session distance spike" rule
       // even when weeks get missed — you repeat the week rather than skipping ahead.
       week: longCompleted + 1,
     },
     core: { completed: coreCompleted },
-    mesocycle: Math.floor(liftCompleted / perBlock) + 1,
-    weekInMeso: (Math.floor(liftCompleted / program.liftsPerWeek) % program.mesocycleWeeks) + 1,
+    mesocycle: meso.mesocycle,
+    weekInMeso: meso.weekInMeso,
+    blockLength: meso.blockLength,
+    role: meso.role,
+    isDeload: meso.isDeload,
+    mesoSource: meso.source,
   };
+}
+
+/**
+ * Race-week status (SYNTHESIS §4.4): in the goal run week, legs go light, and
+ * inside 48 h of the long run they are best skipped. Upper body is untouched —
+ * no evidence that upper-body lifting impairs running.
+ */
+export function raceWeekStatus(program, cursors, today = trainingDate()) {
+  const goal = program.runPlan.find((w) => w.goal);
+  if (!goal || cursors.run.week !== goal.week) return null;
+  const longDow = Number(
+    Object.entries(program.weekTemplate).find(([, slots]) => slots.some((s) => s.key === 'run:long'))?.[0] ?? 6,
+  );
+  const daysUntil = (longDow - dayOfWeek(today) + 7) % 7;
+  const hoursToLongRun = daysUntil * 24;
+  return { goalWeek: true, hoursToLongRun, recommendSkip: hoursToLongRun <= 48 };
+}
+
+/** Thursday reads as rest in the test week and once the long run is ≥ 8 km (§3.5). */
+export function thursdayRest(program, cursors, today = trainingDate()) {
+  const rule = program.thursdayRestWhen;
+  if (!rule || dayOfWeek(today) !== 4) return false;
+  if (rule.role && cursors.role === rule.role) return true;
+  const plan = program.runPlan.find((w) => w.week === cursors.run.week) ?? program.runMaintenance;
+  const km = plan?.long?.km ?? 0;
+  return rule.longRunKm != null && km >= rule.longRunKm;
 }
 
 /** Most recent settled session for a track, or null. */
@@ -136,10 +318,26 @@ function countMissedSlots(program, track, fromDateExclusive, today) {
  */
 export function makeHistoryLookup(sessions, index) {
   const pick = (list, opts) => {
-    if (!list?.length) return null;
+    if (!list?.length) return opts?.all ? [] : null;
     let candidates = list;
     if (opts?.dayKey) candidates = candidates.filter((r) => r.dayKey === opts.dayKey);
     if (opts?.forProgression) candidates = candidates.filter((r) => !r.isDeload);
+
+    // Gym / station ladder. Only requested for gym-specific exercises (a cable
+    // stack's 40 is not another gym's 40). Exact station first, then the same
+    // gym, then anywhere — and the row says how far it had to reach so the
+    // prescription can call a foreign number a guide rather than a target.
+    if (opts?.gymId != null) {
+      const sameGym = candidates.filter((r) => r.gymId === opts.gymId);
+      const exact = opts.station != null ? sameGym.filter((r) => r.station === opts.station) : sameGym;
+      const tag = (rows, scope) => rows.map((r) => ({ ...r, scope }));
+      candidates = exact.length
+        ? tag(exact, opts.station != null ? 'exact' : 'gym')
+        : sameGym.length
+          ? tag(sameGym, 'gym')
+          : tag(candidates, 'other');
+    }
+    if (opts?.all) return candidates;
     return candidates[0] ?? null;
   };
 
@@ -163,6 +361,10 @@ export function makeHistoryLookup(sessions, index) {
           bodyweightKg: s.bodyweightKg,
           dayKey: s.dayKey,
           isDeload: !!s.programRef?.isDeload,
+          role: s.programRef?.role ?? null,
+          programVersion: s.programRef?.version ?? null,
+          gymId: s.gymId ?? null,
+          station: entry.station ?? null,
         });
       }
     }
@@ -177,14 +379,20 @@ export function makeHistoryLookup(sessions, index) {
  */
 export function resolveToday(state, program, today = trainingDate()) {
   const { sessions, meta } = state;
-  const cursors = deriveCursors(sessions, program);
+  const cursors = deriveCursors(sessions, program, { meta, today });
   const historyFor = makeHistoryLookup(sessions, state.index);
+  const race = raceWeekStatus(program, cursors, today);
 
   const ctx = {
+    role: cursors.role,
     weekInMeso: cursors.weekInMeso,
     runWeek: cursors.run.week,
     coreCompleted: cursors.core.completed,
     historyFor,
+    bodyweightKg: meta?.bodyweightKg ?? null,
+    gymId: meta?.lastGymId ?? null,
+    substitutions: meta?.substitutions ?? null,
+    raceWeek: race ? 'light' : null,
   };
 
   const resume = sessions.find((s) => s.status === 'in_progress') ?? null;
@@ -197,7 +405,10 @@ export function resolveToday(state, program, today = trainingDate()) {
    */
   const buildCard = (slot) => {
     const track = trackOf(slot.key);
-    const actualKey = track === 'lift' ? cursors.lift.nextDayKey : slot.key;
+    // Optional lift slots (the bonus day) are what they say; only the required
+    // lift slot is served from the cursor.
+    const actualKey = track === 'lift' && !slot.optional ? cursors.lift.nextDayKey : slot.key;
+    const session = resolveSession(program, actualKey, ctx);
     return {
       slotKey: slot.key,
       key: actualKey,
@@ -205,7 +416,9 @@ export function resolveToday(state, program, today = trainingDate()) {
       optional: !!slot.optional,
       offSchedule: actualKey !== slot.key,
       alreadyDone: false,
-      session: resolveSession(program, actualKey, ctx),
+      // The bonus day is only offered in probe weeks (SYNTHESIS §5.5).
+      unavailable: session.kind === 'lift' && session.allowedThisWeek === false,
+      session,
     };
   };
 
@@ -227,7 +440,7 @@ export function resolveToday(state, program, today = trainingDate()) {
     }
   }
   const required = cards.filter((c) => !c.optional && !c.alreadyDone);
-  const optional = cards.filter((c) => c.optional && !c.alreadyDone);
+  const optional = cards.filter((c) => c.optional && !c.alreadyDone && !c.unavailable);
 
   // Lifts lead, then the long run, then easy runs, then core.
   const rank = (c) =>
@@ -245,7 +458,8 @@ export function resolveToday(state, program, today = trainingDate()) {
     core: countMissedSlots(program, 'core', lastCore ?? anchor, today),
   };
 
-  const mod = weekModifier(program, cursors.weekInMeso);
+  const byRole = program.weekModifiers.some((w) => w.role);
+  const mod = weekModifier(program, byRole ? cursors.role : cursors.weekInMeso);
 
   return {
     date: today,
@@ -256,9 +470,14 @@ export function resolveToday(state, program, today = trainingDate()) {
     optional,
     completedToday: doneToday,
     isRestDay: required.length === 0,
+    restByDefault: thursdayRest(program, cursors, today),
+    raceWeek: race,
     cursors,
     mesocycle: cursors.mesocycle,
     weekInMeso: cursors.weekInMeso,
+    blockLength: cursors.blockLength,
+    role: cursors.role,
+    mesoSource: cursors.mesoSource,
     isDeload: mod.deload,
     weekNote: mod.note,
     runWeek: cursors.run.week,
@@ -274,13 +493,20 @@ export function resolveToday(state, program, today = trainingDate()) {
  * Ordered with what you actually owe first.
  */
 export function alternatives(state, program, today = trainingDate()) {
-  const cursors = deriveCursors(state.sessions, program);
+  const { meta } = state;
+  const cursors = deriveCursors(state.sessions, program, { meta, today });
   const historyFor = makeHistoryLookup(state.sessions, state.index);
+  const race = raceWeekStatus(program, cursors, today);
   const ctx = {
+    role: cursors.role,
     weekInMeso: cursors.weekInMeso,
     runWeek: cursors.run.week,
     coreCompleted: cursors.core.completed,
     historyFor,
+    bodyweightKg: meta?.bodyweightKg ?? null,
+    gymId: meta?.lastGymId ?? null,
+    substitutions: meta?.substitutions ?? null,
+    raceWeek: race ? 'light' : null,
   };
 
   const nextIdx = cursors.lift.position % program.liftCycle.length;
@@ -298,6 +524,7 @@ export function alternatives(state, program, today = trainingDate()) {
       track: trackOf(key),
       isNext: key === cursors.lift.nextDayKey,
       optional: key === 'lift:E',
+      unavailable: session.kind === 'lift' && session.allowedThisWeek === false,
       session,
       subtitle:
         session.kind === 'lift'

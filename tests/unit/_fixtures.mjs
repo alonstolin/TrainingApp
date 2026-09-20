@@ -1,6 +1,7 @@
 /** Shared test fixtures. */
 
-import program from '../../src/program/program.v1.js';
+import program from '../../src/program/program.v3.js';
+import v2 from '../../src/program/program.v1.js';
 
 let seq = 0;
 
@@ -31,10 +32,11 @@ export function mkSession(o = {}) {
     kind,
     dayKey: o.dayKey ?? (kind === 'lift' ? 'lift:B' : kind === 'run' ? 'run:easy' : 'core'),
     variant: o.variant ?? (kind === 'run' ? 'easy' : null),
-    programRef: o.programRef ?? { programId: program.programId, version: 1 },
+    programRef: o.programRef ?? { programId: program.programId, version: program.version, role: o.role ?? null, isDeload: !!o.isDeload },
     prescriptionSnapshot: o.prescriptionSnapshot ?? null,
     bodyweightKg: o.bodyweightKg ?? 80,
     entries: o.entries ?? [],
+    gymId: o.gymId ?? null,
     run: o.run ?? (kind === 'run' ? { distanceKm: 5, durationSec: 1800, effort: 4 } : null),
     notes: o.notes ?? '',
     feeling: o.feeling ?? null,
@@ -67,4 +69,4 @@ export const emptyState = (meta = {}) => ({
   meta: { startDate: '2026-01-05', bodyweightKg: 80, ...meta },
 });
 
-export { program };
+export { program, v2 };

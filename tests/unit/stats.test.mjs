@@ -1,10 +1,11 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  coreAdherence, easyRunEffortByWeekday,
   e1rmSeries, runSeries, weeklyRunVolume, coreSeries,
   weeklyVolumeByMuscle, personalBests, runMilestones, topSetSeries,
 } from '../../src/core/stats.js';
-import { mkSession, mkEntry, mkSet } from './_fixtures.mjs';
+import { mkSession, mkEntry, mkSet, program } from './_fixtures.mjs';
 
 const liftOn = (date, exerciseId, sets, extra = {}) =>
   mkSession({ kind: 'lift', date, entries: [mkEntry(exerciseId, sets)], ...extra });
@@ -132,4 +133,23 @@ test('empty history produces empty series rather than throwing', () => {
   assert.deepEqual(weeklyRunVolume([], '2026-08-17'), []);
   assert.deepEqual(weeklyVolumeByMuscle([], '2026-08-17'), []);
   assert.equal(runMilestones([]).hitTenK, false);
+});
+
+test('core adherence counts lift sessions that carry core and whether any of it was done', () => {
+  const host = (did) => mkSession({ kind: 'lift', dayKey: 'lift:B', status: 'completed',
+    entries: [mkEntry('back-squat', [mkSet({ weightKg: 100, reps: 5 })]), { ...mkEntry('cable-crunch', did ? [mkSet({ weightKg: 20, reps: 12 })] : []), group: 'core' }] });
+  const a = coreAdherence([host(true), host(true), host(true), host(false)], program);
+  assert.deepEqual([a.hosts, a.done, a.pct, a.ok], [4, 3, 75, true]);
+  const bad = coreAdherence([host(true), host(false), host(false)], program);
+  assert.equal(bad.ok, false);
+  assert.equal(coreAdherence([], program).hosts, 0);
+});
+
+test('easy-run effort is summarised by weekday with CR10 and talk-test failure rate', () => {
+  const run = (date, effort, talkTest) => mkSession({ kind: 'run', variant: 'easy', date, status: 'completed', run: { distanceKm: 4.5, durationSec: 1800, effort, talkTest } });
+  const rows = easyRunEffortByWeekday([run('2026-09-15', 5, 'no'), run('2026-09-22', 6, 'yes'), run('2026-09-17', 3, 'yes')]);
+  const tue = rows.find((r) => r.dow === 2);
+  const thu = rows.find((r) => r.dow === 4);
+  assert.deepEqual([tue.runs, tue.meanRpe, tue.talkNegativePct], [2, 5.5, 50]);
+  assert.deepEqual([thu.runs, thu.meanRpe, thu.talkNegativePct], [1, 3, 0]);
 });

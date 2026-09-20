@@ -76,6 +76,10 @@
 }
 .chip[aria-pressed='true'] { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
 .chip--target { border-color: color-mix(in srgb, var(--accent) 55%, var(--line)); color: var(--ink); }
+/* CR10 band: the 3–4 target reads as the default, ≥5 as a warning once pressed. */
+.chip[data-band='target'] { border-color: color-mix(in srgb, var(--good) 55%, var(--line)); color: var(--ink); }
+.chip[data-band='high'][aria-pressed='true'] { background: var(--warn); border-color: var(--warn); color: #1a1200; }
+.chip[data-talk='no'][aria-pressed='true'] { background: var(--warn); border-color: var(--warn); color: #1a1200; }
 
 .pill {
   display: inline-flex;
@@ -204,6 +208,18 @@
 .exnav button[aria-current='true'] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
 .exnav button[data-complete='true'] { border-color: color-mix(in srgb, var(--good) 45%, var(--line)); color: var(--good); }
 .exnav button[aria-current='true'][data-complete='true'] { background: var(--good); color: #04150e; }
+/* Core rides at the end of a lift day; the divider marks where the tail starts. */
+.exnav-divider {
+  flex: 0 0 auto;
+  align-self: center;
+  padding: 0 var(--sp-2);
+  border-left: 1px solid var(--line);
+  font-size: var(--fs-xs);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--ink-3);
+}
+.exnav button[data-group='core'] { border-style: dashed; }
 
 /* ---- Action bar --------------------------------------------------------- */
 
@@ -303,6 +319,8 @@
 .mesostrip span[data-state='done'] { background: var(--accent); }
 .mesostrip span[data-state='current'] { background: var(--ink); }
 .mesostrip span[data-state='deload'] { background: var(--deload); }
+.mesostrip span[data-state='todo'][data-role='deload'] { background: color-mix(in srgb, var(--deload) 35%, var(--surface-2)); }
+.mesostrip span[data-state='todo'][data-role='test'] { background: color-mix(in srgb, var(--accent) 25%, var(--surface-2)); }
 
 /* ---- Calendar ----------------------------------------------------------- */
 

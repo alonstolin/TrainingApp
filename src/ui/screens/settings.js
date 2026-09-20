@@ -140,15 +140,46 @@ export default function mountSettings(root) {
       min: 30,
       max: 250,
       label: 'kg',
-      onChange: (v) => store.setMeta({ bodyweightKg: v }),
+      onChange: (v) => (v == null ? store.setMeta({ bodyweightKg: null }) : store.logBodyweight(v)),
     });
+    const bwLog = meta.bodyweightLog ?? [];
+    const drift =
+      bwLog.length >= 2
+        ? Math.round((bwLog[bwLog.length - 1].kg - bwLog[0].kg) * 10) / 10
+        : null;
     blocks.appendChild(
       el(
         'div.stack',
         null,
         el('div.section-label', { text: 'Bodyweight' }),
         bw,
-        el('p.xs.dim', { text: 'Used to compute weighted pull-up strength (bodyweight + added load). Without it that chart drifts whenever your weight does.' }),
+        el('p.xs.dim', {
+          text:
+            'Used for weighted pull-up strength (bodyweight + added load) and every percentage of its block reference. Weigh in weekly — a downward drift over 0.5 kg in two weeks during the running build is a nutrition signal, not a training one.',
+        }),
+        bwLog.length
+          ? el('p.xs.dim.num', { text: `${bwLog.length} readings since ${formatRelativeDate(bwLog[0].date)}${drift != null ? ` · ${drift > 0 ? '+' : ''}${drift} kg overall` : ''}` })
+          : null,
+      ),
+    );
+
+    // ---- RUNNING RISK
+    const injury = meta.priorLowerLimbInjury;
+    const injuryChips = el('div.chips');
+    for (const [v, label] of [[true, 'Yes'], [false, 'No']]) {
+      const b = el('button.chip', { type: 'button', text: label, 'aria-pressed': String(injury === v) });
+      onTap(b, () => store.setMeta({ priorLowerLimbInjury: v }));
+      injuryChips.appendChild(b);
+    }
+    blocks.appendChild(
+      el(
+        'div.stack',
+        null,
+        el('div.section-label', { text: 'Previous lower-limb running injury' }),
+        injuryChips,
+        el('p.xs.dim', {
+          text: 'Shin, knee, Achilles or calf, foot. The one predictor found in every novice-runner cohort (HR ≈ 2–3). "Yes" makes the distance warnings read as stops.',
+        }),
       ),
     );
 
@@ -165,13 +196,19 @@ export default function mountSettings(root) {
           el('div.listitem-title', { text: CURRENT_PROGRAM.name }),
           el('div.small.muted', {
             style: { marginTop: '0.35rem' },
-            text: `Block ${c.mesocycle}, week ${c.weekInMeso} of ${CURRENT_PROGRAM.mesocycleWeeks} · ${c.lift.completed} lifts, ${c.run.longCompleted + c.run.easyCompleted} runs, ${c.core.completed} core logged`,
+            text: `Block ${c.mesocycle}, week ${c.weekInMeso} of ${c.blockLength ?? CURRENT_PROGRAM.mesocycleWeeks} (${c.role}) · ${c.lift.completed} lifts, ${c.run.longCompleted + c.run.easyCompleted} runs, ${c.core.completed} core logged`,
           }),
           el('div.small.muted', { style: { marginTop: '0.35rem' }, text: `Next up: ${c.lift.nextDayKey.replace('lift:', 'Day ')}` }),
         ),
         el('p.xs.dim', {
-          text: 'Your place in the program follows the sessions you actually complete, not the calendar. Missing a week never triggers a deload you have not earned.',
+          text:
+            c.mesoSource === 'run'
+              ? 'During the 10K build the lifting week follows the running week, so lifting deloads land on the running down-weeks. If running stops for two weeks the lift count takes over.'
+              : 'Your place in the program follows the sessions you actually complete, not the calendar. Missing a week never triggers a deload you have not earned.',
         }),
+        meta.v3StartedAt
+          ? el('p.xs.dim', { text: `Program v${CURRENT_PROGRAM.version} since ${formatRelativeDate(meta.v3StartedAt.date)}${meta.v3StartedAt.deloadFirst ? ' · entered through a deload week' : ''}.` })
+          : null,
         meta.startDate
           ? null
           : onTap(el('button.btn.btn--ghost.btn--block.btn--sm', { type: 'button', text: 'Set today as the program start' }), () => {

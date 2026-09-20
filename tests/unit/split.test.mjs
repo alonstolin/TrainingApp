@@ -68,15 +68,22 @@ test('priority muscles keep their weekly volume after the restructure', () => {
 test('every main lift still gets a heavy and a volume exposure', () => {
   const seen = {};
   for (const k of program.liftCycle) {
-    for (const e of resolveLiftSession(program, k, 1, () => null).entries) {
+    for (const e of resolveLiftSession(program, k, { role: 'probe', historyFor: () => null }).entries) {
       if (!['incline-bench', 'ohp', 'weighted-pullup'].includes(e.exerciseId)) continue;
       (seen[e.exerciseId] ??= []).push(e.scheme);
     }
   }
   for (const lift of ['incline-bench', 'ohp', 'weighted-pullup']) {
-    assert.equal(seen[lift].filter((x) => x === 'top_backoff').length, 1, `${lift} heavy`);
+    assert.equal(seen[lift].filter((x) => x === 'probe_backoff').length, 1, `${lift} heavy`);
     assert.equal(seen[lift].filter((x) => x === 'double_progression').length, 1, `${lift} volume`);
   }
+});
+
+test('core attached to Lower and Push never counts toward the adjacency invariant', () => {
+  // Both days carry core; they are 48h apart and it is low-fatigue tail work.
+  // muscleLoad reads the day's blocks, and core is attached at resolution.
+  assert.ok(!('core' in muscleLoad(program, 'lift:B')));
+  assert.ok(!('core' in muscleLoad(program, 'lift:A')));
 });
 
 test('musclesWorked ignores incidental single sets', () => {

@@ -24,8 +24,8 @@ const filename = () => {
 };
 
 export function buildPayload() {
-  const { meta, sessions } = store.getState();
-  return buildBackup(meta, sessions, APP_VERSION);
+  const { meta, sessions, routes } = store.getState();
+  return buildBackup(meta, sessions, routes ?? [], APP_VERSION);
 }
 
 export function payloadText() {

@@ -22,7 +22,9 @@ import { toast, undoToast } from '../toast.js';
 import * as store from '../../data/store.js';
 import { getExercise } from '../../program/exercises.js';
 import { formatRelativeDate, formatDuration } from '../../core/dates.js';
-import { paceSecPerKm, formatPace, effectiveLoad, e1rm } from '../../core/progression.js';
+import { paceSecPerKm, formatPace, effectiveLoad, e1rm, runLoadWarnings } from '../../core/progression.js';
+import { sessionIntegrity } from '../../core/schema.js';
+import { getProgram } from '../../program/index.js';
 import { navigate } from '../../router.js';
 
 // ---------------------------------------------------------------------------
@@ -69,6 +71,12 @@ function finishFlow(session, { onDone }) {
   const done = countDone(session);
   const total = countTotal(session);
   const short = total - done;
+  const coreEntries = (session.entries ?? []).filter((e) => e.group === 'core');
+  const coreDone = coreEntries.filter((e) => e.sets.some((s) => s.done)).length;
+  const coreNote =
+    coreEntries.length && coreDone < coreEntries.length
+      ? ` Core: ${coreDone} of ${coreEntries.length} moves logged — it is tracked, and under 75% means the placement is wrong, not you.`
+      : '';
 
   const feelingRow = el('div.chips', { style: { marginTop: '0.75rem' } });
   let feeling = session.feeling ?? null;
@@ -85,9 +93,9 @@ function finishFlow(session, { onDone }) {
   openSheet({
     title: 'Finish session?',
     subtitle:
-      short > 0
+      (short > 0
         ? `${done} of ${total} sets logged. The ${short} you didn't do won't be recorded — an unlogged set is a set you didn't do, not a set of nothing.`
-        : `All ${done} sets logged.`,
+        : `All ${done} sets logged.`) + coreNote,
     content: el('div', null, el('div.eyebrow', { text: 'How did it feel?' }), feelingRow),
     actions: [
       {
@@ -109,16 +117,127 @@ function finishFlow(session, { onDone }) {
 // LIFT
 // ---------------------------------------------------------------------------
 
+const TYPE_LABEL = { top: 'TOP', probe: 'PROBE', backoff: 'BACK-OFF', warmup: 'WARMUP' };
+
+/** How a logged set reads in the list. */
+function setSummary(s, ex) {
+  const bw = ex.loadModel === 'bodyweight_plus' ? '+' : '';
+  if (ex.metric === 'time') return `${s.seconds ?? s.targetSeconds ?? '—'}s`;
+  if (ex.metric === 'weight_time') {
+    return `${s.weightKg != null ? fmtWeight(s.weightKg) + ' × ' : ''}${s.seconds ?? s.targetSeconds ?? '—'}s`;
+  }
+  if (ex.metric === 'reps') return `${s.reps ?? s.targetReps ?? '—'} reps`;
+  if (s.done) {
+    return `${s.weightKg != null ? fmtWeight(s.weightKg) + bw : ''}${s.weightKg != null ? ' × ' : ''}${s.reps ?? '—'}${s.rpe ? ` @ ${s.rpe}` : ''}`;
+  }
+  return `${s.weightKg != null ? fmtWeight(s.weightKg) + bw : '—'} × ${s.targetReps ?? '—'}`;
+}
+
+/**
+ * The editor for one pending set, by the exercise's metric. Returns the fields
+ * to render and a `read()` that yields the values to log (or a reason not to).
+ */
+function setEditor(ex, current, { liveTimer }) {
+  const draft = { weightKg: current.weightKg, reps: current.targetReps ?? null, rpe: null, seconds: null };
+  const isBw = ex.loadModel === 'bodyweight_plus';
+  const wantsWeight = ex.metric === 'weight_reps' || ex.metric === 'weight_time';
+  const wantsReps = ex.metric === 'weight_reps' || ex.metric === 'reps';
+  const wantsTime = ex.metric === 'time' || ex.metric === 'weight_time';
+  const wantsRpe = ex.metric === 'weight_reps' && current.rpeTarget !== 10;
+
+  const fields = el('div.stack');
+  const weightStepper = wantsWeight
+    ? stepper({
+        value: current.weightKg,
+        step: ex.increment,
+        unit: ex.unit,
+        min: isBw ? -60 : 0,
+        label: isBw ? 'added kg' : 'kg',
+        onChange: (v) => {
+          draft.weightKg = v;
+        },
+      })
+    : null;
+
+  let repStepper = null;
+  let quickReps = null;
+  if (wantsReps) {
+    repStepper = stepper({
+      value: draft.reps,
+      step: 1,
+      min: 0,
+      max: 100,
+      label: 'reps',
+      format: (v) => String(Math.round(v)),
+      onChange: (v) => {
+        draft.reps = v;
+        quickReps?.setValue(v);
+      },
+    });
+    quickReps = repRow({
+      value: draft.reps,
+      target: current.targetReps,
+      onChange: (v) => {
+        draft.reps = v;
+        repStepper.setValue(v);
+      },
+    });
+  }
+
+  const grid = el('div.field-grid', null, weightStepper, repStepper);
+  if (weightStepper || repStepper) fields.appendChild(grid);
+  if (quickReps) fields.appendChild(el('div', null, el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'Reps'), quickReps));
+  if (wantsTime) {
+    const t = liveTimer({ targetSeconds: current.targetSeconds });
+    fields.appendChild(t.node);
+    draft.readSeconds = () => t.getSeconds();
+  }
+  if (wantsRpe) {
+    fields.appendChild(
+      el(
+        'div',
+        null,
+        el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'RPE'),
+        rpeRow({ value: null, target: current.rpeTarget, onChange: (v) => { draft.rpe = v; } }),
+      ),
+    );
+  } else if (ex.metric === 'weight_reps' && current.rpeTarget === 10) {
+    fields.appendChild(el('p.xs.dim', { text: 'Last set: to failure. Logged as RPE 10.' }));
+    draft.rpe = 10;
+  }
+
+  return {
+    node: fields,
+    read() {
+      const out = {};
+      if (wantsWeight) out.weightKg = draft.weightKg;
+      if (wantsReps) {
+        if (!draft.reps) return { error: 'Add a rep count first' };
+        out.reps = draft.reps;
+      }
+      if (wantsTime) {
+        const secs = draft.readSeconds?.() ?? 0;
+        if (!secs) return { error: 'Start the timer first' };
+        out.seconds = secs;
+      }
+      if (ex.metric === 'weight_reps') out.rpe = draft.rpe;
+      return { values: out };
+    },
+  };
+}
+
 function mountLift(screen, session, ctx) {
   let activeEntry = 0;
   let activeSet = null;
-  const draft = {};
+  let liveTimer = null;
 
   // Resume where you left off rather than at the top.
   const firstUnfinished = session.entries.findIndex((e) => e.sets.some((s) => !s.done));
   if (firstUnfinished >= 0) activeEntry = firstUnfinished;
 
   const render = () => {
+    liveTimer?.stop?.();
+    liveTimer = null;
     clear(screen);
     const entry = session.entries[activeEntry];
     if (!entry) return;
@@ -135,15 +254,20 @@ function mountLift(screen, session, ctx) {
 
     append(screen, [header(session, () => finishFlow(session, ctx))]);
 
-    // ---- exercise switcher
+    // ---- exercise switcher (core work gets a divider — it is the tail of the day)
     const nav = el('div.exnav');
+    let dividerDone = false;
     session.entries.forEach((e, i) => {
+      if (e.group === 'core' && !dividerDone) {
+        nav.appendChild(el('span.exnav-divider', { text: 'core', 'aria-hidden': 'true' }));
+        dividerDone = true;
+      }
       const complete = e.sets.length > 0 && e.sets.every((s) => s.done);
       const b = el('button', {
         type: 'button',
         text: getExercise(e.exerciseId).short,
         'aria-current': String(i === activeEntry),
-        dataset: { complete: String(complete) },
+        dataset: { complete: String(complete), group: e.group ?? 'lift' },
       });
       onTap(b, () => {
         activeEntry = i;
@@ -159,6 +283,7 @@ function mountLift(screen, session, ctx) {
     screen.appendChild(body);
 
     // ---- prescription
+    const ref = snapEntry.reference;
     body.appendChild(
       el(
         'div.stack',
@@ -167,9 +292,17 @@ function mountLift(screen, session, ctx) {
           'div.row',
           { style: { gap: '0.5rem', alignItems: 'baseline', flexWrap: 'wrap' } },
           snapEntry.tier ? el('span.pill.pill--t1', { text: snapEntry.tier }) : null,
+          entry.group === 'core' ? el('span.pill', { text: 'CORE' }) : null,
           el('h2', { text: ex.name, style: { fontSize: 'var(--fs-lg)', fontWeight: '700' } }),
         ),
         el('div.small.muted.num', { text: snapEntry.label ?? '' }),
+        ref
+          ? el('div.xs.dim.num', {
+              text: `Block reference e1RM ${Math.round(ref.e1rm)} kg${ex.loadModel === 'bodyweight_plus' ? ' (system)' : ''} · ${
+                ref.source === 'test' ? 'set by last test' : ref.source === 'backoffs' ? 'raised by back-offs' : ref.source === 'probe-raise' ? 'raised by today\'s probe' : 'from the probe'
+              }`,
+            })
+          : null,
 
         // The single most valuable element on the screen.
         snapEntry.lastTime
@@ -177,7 +310,9 @@ function mountLift(screen, session, ctx) {
               'div.lasttime',
               null,
               el('div.lasttime-label', {
-                text: `Last time · ${formatRelativeDate(snapEntry.lastTime.date, session.date)}`,
+                text: `Last time · ${formatRelativeDate(snapEntry.lastTime.date, session.date)}${
+                  snapEntry.scope === 'other' ? ' · other gym' : ''
+                }`,
               }),
               el('div.lasttime-sets', { text: fmtSets(snapEntry.lastTime.sets) }),
             )
@@ -190,6 +325,7 @@ function mountLift(screen, session, ctx) {
 
         snapEntry.suggestion ? el('div.suggestion', { text: snapEntry.suggestion }) : null,
         ex.cue ? el('div.cue', { text: ex.cue }) : null,
+        ex.perSide ? el('div.small.muted', { text: 'Both sides count as one set.' }) : null,
       ),
     );
 
@@ -197,12 +333,8 @@ function mountLift(screen, session, ctx) {
     const list = el('div.setlist');
     entry.sets.forEach((s, i) => {
       const isActive = s.setId === activeSet;
-      const typeLabel = s.type === 'top' ? 'TOP' : s.type === 'backoff' ? 'BACK-OFF' : s.type === 'warmup' ? 'WARMUP' : '';
-      const main = s.done
-        ? `${s.weightKg != null ? fmtWeight(s.weightKg) + (ex.loadModel === 'bodyweight_plus' ? '+' : '') : ''}${
-            s.weightKg != null ? ' × ' : ''
-          }${s.reps ?? '—'}${s.rpe ? ` @ ${s.rpe}` : ''}`
-        : `${s.weightKg != null ? fmtWeight(s.weightKg) : '—'} × ${s.targetReps ?? '—'}`;
+      const typeLabel = TYPE_LABEL[s.type] ?? '';
+      const main = setSummary(s, ex);
 
       const row = el(
         `button.setrow${s.done ? '.setrow--done' : ''}${isActive && !s.done ? '.setrow--active' : ''}`,
@@ -215,7 +347,9 @@ function mountLift(screen, session, ctx) {
           el('div.setrow-sub', {
             text: s.done
               ? typeLabel || 'logged'
-              : [typeLabel, s.rpeTarget ? `target RPE ${s.rpeTarget}` : null].filter(Boolean).join(' · ') || 'to do',
+              : [typeLabel, s.rpeTarget ? (s.rpeTarget === 10 ? 'to failure' : `target RPE ${s.rpeTarget}`) : null]
+                  .filter(Boolean)
+                  .join(' · ') || 'to do',
           }),
         ),
         el('span.setrow-type', { text: s.done ? '✓' : '' }),
@@ -267,80 +401,32 @@ function mountLift(screen, session, ctx) {
 
     // ---- editor for the active set
     if (current && !current.done) {
-      draft.weightKg = current.weightKg;
-      draft.reps = current.targetReps ?? null;
-      draft.rpe = null;
-
-      const isBw = ex.loadModel === 'bodyweight_plus';
-      const weightStepper = stepper({
-        value: current.weightKg,
-        step: ex.increment,
-        unit: ex.unit,
-        min: isBw ? -60 : 0,
-        label: isBw ? 'added kg' : 'kg',
-        onChange: (v) => {
-          draft.weightKg = v;
-        },
-      });
-
-      const repStepper = stepper({
-        value: draft.reps,
-        step: 1,
-        min: 0,
-        max: 100,
-        label: 'reps',
-        format: (v) => String(Math.round(v)),
-        onChange: (v) => {
-          draft.reps = v;
-          quickReps.setValue(v);
-        },
-      });
-
-      const quickReps = repRow({
-        value: draft.reps,
-        target: current.targetReps,
-        onChange: (v) => {
-          draft.reps = v;
-          repStepper.setValue(v);
-        },
-      });
-
-      const rpe = rpeRow({
-        value: null,
-        target: current.rpeTarget,
-        onChange: (v) => {
-          draft.rpe = v;
+      const editor = setEditor(ex, current, {
+        liveTimer: (o) => {
+          liveTimer = holdTimer(o);
+          return { node: liveTimer, getSeconds: () => liveTimer.getSeconds() };
         },
       });
 
       body.appendChild(
-        el(
-          'div.stack',
-          null,
-          el('div.eyebrow', { text: `Set ${entry.sets.indexOf(current) + 1}` }),
-          el('div.field-grid', null, weightStepper, repStepper),
-          el('div', null, el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'Reps'), quickReps),
-          el('div', null, el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'RPE'), rpe),
-        ),
+        el('div.stack', null, el('div.eyebrow', { text: `Set ${entry.sets.indexOf(current) + 1}` }), editor.node),
       );
 
+      const logLabel = ex.metric === 'time' || ex.metric === 'weight_time' ? 'Log hold' : 'Log set';
       screen.appendChild(
         actionBar(
           onTap(
-            el('button.btn.btn--primary.btn--xl.btn--block', { type: 'button', text: 'Log set' }),
+            el('button.btn.btn--primary.btn--xl.btn--block', { type: 'button', text: logLabel }),
             () => {
-              if (!draft.reps) {
-                toast('Add a rep count first');
+              const r = editor.read();
+              if (r.error) {
+                toast(r.error);
                 return;
               }
               const idx = entry.sets.indexOf(current);
-              store.logSet(session.id, entry.entryId, current.setId, {
-                weightKg: draft.weightKg,
-                reps: draft.reps,
-                rpe: draft.rpe,
-              });
+              store.logSet(session.id, entry.entryId, current.setId, r.values);
 
-              const rest = snapEntry.restSec ?? 120;
+              const rest = snapEntry.restSec ?? (entry.group === 'core' ? 45 : 120);
               startRest(rest, ex.short);
 
               // Auto-advance: next set here, else the next unfinished exercise.
@@ -395,7 +481,10 @@ function mountLift(screen, session, ctx) {
     }
   };
 
-  return render;
+  const wrapped = () => render();
+  wrapped.stop = () => liveTimer?.stop?.();
+  ctx.onTeardown?.(() => liveTimer?.stop?.());
+  return wrapped;
 }
 
 // ---------------------------------------------------------------------------
@@ -408,6 +497,7 @@ function mountRun(screen, session, ctx) {
     distanceKm: session.run?.distanceKm ?? snap.target?.km ?? null,
     durationSec: session.run?.durationSec ?? (snap.target?.minutes ? snap.target.minutes * 60 : null),
     effort: session.run?.effort ?? null,
+    talkTest: session.run?.talkTest ?? null,
     notes: session.run?.notes ?? '',
     track: session.run?.track ?? null,
   };
@@ -529,15 +619,35 @@ function mountRun(screen, session, ctx) {
       },
     });
 
+    // CR10 effort with the 3–4 band marked (SYNTHESIS §3.3). ≥ 5 on an easy run
+    // is an intensity error, and this number is the one training variable that
+    // tracked injury in novices (Kluitenberg 2016).
     const effort = el('div.chips');
     for (let i = 1; i <= 10; i++) {
-      const b = el('button.chip', { type: 'button', text: String(i), 'aria-pressed': String(draft.effort === i) });
+      const b = el('button.chip', {
+        type: 'button',
+        text: String(i),
+        'aria-pressed': String(draft.effort === i),
+        dataset: { band: i >= 3 && i <= 4 ? 'target' : i >= 5 ? 'high' : 'low' },
+      });
       onTap(b, () => {
         draft.effort = i;
         for (const c of effort.children) c.setAttribute('aria-pressed', 'false');
         b.setAttribute('aria-pressed', 'true');
       });
       effort.appendChild(b);
+    }
+
+    // Talk Test — could you say a full ~10-word sentence without a breath pause?
+    const talk = el('div.chips');
+    for (const [v, label] of [['yes', 'Full sentences'], ['no', 'Couldn\'t talk']]) {
+      const b = el('button.chip', { type: 'button', text: label, 'aria-pressed': String(draft.talkTest === v), dataset: { talk: v } });
+      onTap(b, () => {
+        draft.talkTest = v;
+        for (const c of talk.children) c.setAttribute('aria-pressed', 'false');
+        b.setAttribute('aria-pressed', 'true');
+      });
+      talk.appendChild(b);
     }
 
     paintPace();
@@ -565,7 +675,18 @@ function mountRun(screen, session, ctx) {
           el('div.field-grid', null, minStep, secStep),
         ),
         el('div.stat', null, pace, paceNote),
-        el('div', null, el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'Perceived effort (1–10)'), effort),
+        el(
+          'div',
+          null,
+          el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'Effort (CR10) · aim for 3–4'),
+          effort,
+        ),
+        el(
+          'div',
+          null,
+          el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'Talk test — a full sentence without a breath?'),
+          talk,
+        ),
       ),
     ]);
 
@@ -579,10 +700,31 @@ function mountRun(screen, session, ctx) {
     );
   };
 
-  function commit(viaFinish) {
+  function commit(viaFinish, { confirmed = false } = {}) {
     if (!draft.distanceKm || !draft.durationSec) {
       toast('Distance and time are both needed to log a run');
       return;
+    }
+    // The load rails run on what was ACTUALLY run, GPS or typed — a planned
+    // 5.5 that became 7 is exactly the run the guard exists for (SYNTHESIS §3.1).
+    if (!confirmed) {
+      const { sessions, meta } = store.getState();
+      const warnings = runLoadWarnings(
+        sessions,
+        { km: draft.distanceKm, date: session.date, sessionId: session.id },
+        { today: session.date, priorInjury: meta.priorLowerLimbInjury === true },
+      );
+      if (warnings.length) {
+        openSheet({
+          title: 'That is a bigger jump than planned',
+          subtitle: warnings.map((w) => w.message).join(' '),
+          actions: [
+            { label: 'Log it anyway', variant: 'danger', onSelect: () => commit(viaFinish, { confirmed: true }) },
+            { label: 'Check the distance', variant: 'ghost' },
+          ],
+        });
+        return;
+      }
     }
     stopTracker();
     store.updateSession(session.id, (s) => {
@@ -593,164 +735,6 @@ function mountRun(screen, session, ctx) {
     const p = paceSecPerKm(draft.distanceKm, draft.durationSec);
     toast(`${draft.distanceKm.toFixed(1)}km logged · ${formatPace(p)}`, { kind: 'good' });
     ctx.onDone();
-  }
-
-  return render;
-}
-
-// ---------------------------------------------------------------------------
-// CORE
-// ---------------------------------------------------------------------------
-
-function mountCore(screen, session, ctx) {
-  let activeEntry = 0;
-  const firstUnfinished = session.entries.findIndex((e) => e.sets.some((s) => !s.done));
-  if (firstUnfinished >= 0) activeEntry = firstUnfinished;
-
-  let liveTimer = null;
-
-  const render = () => {
-    liveTimer?.stop?.();
-    liveTimer = null;
-    clear(screen);
-
-    const entry = session.entries[activeEntry];
-    if (!entry) return;
-    const ex = getExercise(entry.exerciseId);
-    const snapEntry = session.prescriptionSnapshot?.entries?.[activeEntry] ?? {};
-    const isTime = ex.metric === 'time';
-    const current = entry.sets.find((s) => !s.done);
-
-    append(screen, [header(session, () => finishFlow(session, ctx))]);
-
-    const nav = el('div.exnav');
-    session.entries.forEach((e, i) => {
-      const complete = e.sets.every((s) => s.done);
-      const b = el('button', {
-        type: 'button',
-        text: getExercise(e.exerciseId).short,
-        'aria-current': String(i === activeEntry),
-        dataset: { complete: String(complete) },
-      });
-      onTap(b, () => {
-        activeEntry = i;
-        render();
-        scrollTop();
-      });
-      nav.appendChild(b);
-    });
-    screen.appendChild(nav);
-
-    const body = el('div.stack-lg', { style: { marginTop: '1rem' } });
-    screen.appendChild(body);
-
-    body.appendChild(
-      el(
-        'div.stack',
-        null,
-        el('h2', { text: ex.name, style: { fontSize: 'var(--fs-lg)', fontWeight: '700' } }),
-        el('div.small.muted', { text: snapEntry.label ?? '' }),
-        ex.cue ? el('div.cue', { text: ex.cue }) : null,
-        ex.perSide ? el('div.small.muted', { text: 'Both sides count as one set.' }) : null,
-      ),
-    );
-
-    const list = el('div.setlist');
-    entry.sets.forEach((s, i) => {
-      const val = s.done ? (isTime ? `${s.seconds}s` : `${s.reps} reps`) : isTime ? `${s.targetSeconds}s target` : `${s.targetReps} target`;
-      const row = el(
-        `button.setrow${s.done ? '.setrow--done' : ''}${!s.done && s === current ? '.setrow--active' : ''}`,
-        { type: 'button' },
-        el('span.setrow-idx', { text: String(i + 1) }),
-        el('span', null, el('div.setrow-main.num', { text: val })),
-        el('span.setrow-type', { text: s.done ? '✓' : '' }),
-      );
-      onTap(row, () => {
-        if (s.done) {
-          store.unlogSet(session.id, entry.entryId, s.setId);
-          render();
-        }
-      });
-      list.appendChild(row);
-    });
-    body.appendChild(list);
-
-    if (current) {
-      if (isTime) {
-        liveTimer = holdTimer({ targetSeconds: current.targetSeconds });
-        body.appendChild(liveTimer);
-        screen.appendChild(
-          actionBar(
-            onTap(el('button.btn.btn--primary.btn--xl.btn--block', { type: 'button', text: 'Log hold' }), () => {
-              const seconds = liveTimer.getSeconds();
-              if (!seconds) {
-                toast('Start the timer first');
-                return;
-              }
-              store.logSet(session.id, entry.entryId, current.setId, { seconds });
-              startRest(snapEntry.restSec ?? 45, ex.short);
-              advance();
-            }),
-          ),
-        );
-      } else {
-        let reps = current.targetReps ?? 10;
-        const repStep = stepper({
-          value: reps,
-          step: 1,
-          min: 0,
-          max: 100,
-          label: 'reps',
-          format: (v) => String(Math.round(v)),
-          onChange: (v) => {
-            reps = v;
-          },
-        });
-        body.appendChild(el('div', null, el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'Reps'), repStep));
-        screen.appendChild(
-          actionBar(
-            onTap(el('button.btn.btn--primary.btn--xl.btn--block', { type: 'button', text: 'Log set' }), () => {
-              if (!reps) {
-                toast('Add a rep count first');
-                return;
-              }
-              store.logSet(session.id, entry.entryId, current.setId, { reps });
-              startRest(snapEntry.restSec ?? 45, ex.short);
-              advance();
-            }),
-          ),
-        );
-      }
-    } else {
-      const allDone = session.entries.every((e) => e.sets.every((s) => s.done));
-      screen.appendChild(
-        actionBar(
-          onTap(
-            el(`button.btn.${allDone ? 'btn--good' : 'btn--primary'}.btn--xl.btn--block`, {
-              type: 'button',
-              text: allDone ? 'Finish session' : 'Next exercise',
-            }),
-            () => {
-              if (allDone) finishFlow(session, ctx);
-              else advance();
-            },
-          ),
-        ),
-      );
-    }
-  };
-
-  function advance() {
-    const entry = session.entries[activeEntry];
-    if (!entry.sets.some((s) => !s.done)) {
-      const ni = session.entries.findIndex((e, i) => i > activeEntry && e.sets.some((s) => !s.done));
-      if (ni >= 0) {
-        activeEntry = ni;
-        scrollTop();
-      }
-    }
-    render();
-    renderRest();
   }
 
   return render;
@@ -786,10 +770,28 @@ function renderCompleted(screen, session) {
         el('div.stat', null, el('div.stat-value.num', { text: formatDuration(session.run.durationSec) }), el('div.stat-label', { text: 'time' })),
         el('div.stat', null, el('div.stat-value.num', { text: formatPace(p).replace(' /km', '') }), el('div.stat-label', { text: 'per km' })),
         session.run.effort
-          ? el('div.stat', null, el('div.stat-value.num', { text: String(session.run.effort) }), el('div.stat-label', { text: 'effort' }))
+          ? el('div.stat', null, el('div.stat-value.num', { text: String(session.run.effort) }), el('div.stat-label', { text: 'CR10' }))
+          : null,
+        session.run.talkTest
+          ? el('div.stat', null, el('div.stat-value', { text: session.run.talkTest === 'yes' ? '✓' : '✗' }), el('div.stat-label', { text: 'talk test' }))
           : null,
       ),
     );
+  }
+
+  // Does the record agree with itself? Read-only — it never blocks anything,
+  // it makes a title/exercise mismatch visible instead of leaving it to memory.
+  if (session.kind === 'lift') {
+    const check = sessionIntegrity(session, getProgram(session.programRef?.version));
+    if (!check.ok) {
+      body.appendChild(
+        el(
+          'div.banner.banner--warn',
+          { dataset: { integrity: 'mismatch' } },
+          el('span.grow.small', { text: `Prescription mismatch: ${check.problems.join('; ')}.` }),
+        ),
+      );
+    }
   }
 
   for (const entry of session.entries ?? []) {
@@ -810,7 +812,12 @@ function renderCompleted(screen, session) {
       el(
         'div.card',
         null,
-        el('div.row-between', null, el('div.listitem-title', { text: ex.name }), best.v ? el('span.small.dim.num', { text: `e1RM ${Math.round(best.v)}kg` }) : null),
+        el(
+          'div.row-between',
+          null,
+          el('div.listitem-title', { text: ex.name + (entry.group === 'core' ? ' · core' : '') + (entry.swappedFrom ? ' · swapped in' : '') }),
+          best.v && ex.metric === 'weight_reps' ? el('span.small.dim.num', { text: `e1RM ${Math.round(best.v)}kg` }) : null,
+        ),
         el('div.small.muted.num', { style: { marginTop: '0.35rem' }, text: fmtSets(entry.sets, { max: 12 }) }),
       ),
     );
@@ -866,12 +873,9 @@ export default function mountSession(root, params) {
   const teardown = [];
   const ctx = { onDone: () => navigate('/'), onTeardown: (fn) => teardown.push(fn) };
 
-  const render =
-    session.kind === 'lift'
-      ? mountLift(screen, session, ctx)
-      : session.kind === 'run'
-        ? mountRun(screen, session, ctx)
-        : mountCore(screen, session, ctx);
+  // Lift and standalone core sessions share one logger: every entry carries
+  // its own metric (weight × reps, reps, a hold, a loaded carry).
+  const render = session.kind === 'run' ? mountRun(screen, session, ctx) : mountLift(screen, session, ctx);
 
   render();
   renderRest();

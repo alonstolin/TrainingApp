@@ -21,6 +21,8 @@ async function startVia(page, name) {
   else await page.locator('button', { hasText: 'Train something anyway' }).click();
 
   await page.locator('.sheet .listitem', { hasText: name }).first().click();
+  const use = page.locator('.sheet button', { hasText: 'Use this weight' });
+  if (await use.isVisible().catch(() => false)) await use.click();
   await expect(page.locator('.screen--session')).toBeVisible();
 }
 
@@ -73,20 +75,22 @@ test('a run refuses to log without both distance and time', async ({ page }) => 
   await expect(page.locator('.screen--session')).toBeVisible();
 });
 
-test('logs core work, handling both timed holds and rep-based sets', async ({ page }) => {
+test('logs core work, handling loaded reps and timed holds in one logger', async ({ page }) => {
   const errors = watchErrors(page);
   await boot(page);
-  await startVia(page, 'Core');
+  await startVia(page, /Core — Phase/);
 
-  // Phase 1 opens with Dead Bug (reps). Log every set of it.
+  // Phase 1 opens with the cable crunch (weight × reps). Log both sets.
   await expect(page.locator('.exnav button').first()).toBeVisible();
-  for (let i = 0; i < 3; i++) {
+  const plus = page.locator('.stepper').nth(0).locator('button', { hasText: '+' });
+  for (let i = 0; i < 8; i++) await plus.click(); // 20 kg
+  for (let i = 0; i < 2; i++) {
     await page.locator('button', { hasText: /^Log set$/ }).click();
     await page.waitForTimeout(150);
   }
 
-  // Jump to a timed exercise and run the hold timer.
-  await page.locator('.exnav button', { hasText: 'Front Plank' }).click();
+  // Jump to the timed balance hold and run the hold timer.
+  await page.locator('.exnav button', { hasText: 'SL Balance' }).click();
   await expect(page.locator('.bigtimer')).toBeVisible();
 
   await page.locator('button', { hasText: 'Start hold' }).click();
@@ -99,32 +103,51 @@ test('logs core work, handling both timed holds and rep-based sets', async ({ pa
     const s = store.getState().sessions.find((x) => x.kind === 'core');
     return (s.entries ?? []).map((e) => ({
       id: e.exerciseId,
-      done: e.sets.filter((x) => x.done).map((x) => ({ reps: x.reps, seconds: x.seconds })),
+      done: e.sets.filter((x) => x.done).map((x) => ({ reps: x.reps, seconds: x.seconds, weightKg: x.weightKg })),
     }));
   });
 
-  const deadbug = logged.find((e) => e.id === 'dead-bug');
-  const plank = logged.find((e) => e.id === 'front-plank');
+  const crunch = logged.find((e) => e.id === 'cable-crunch');
+  const balance = logged.find((e) => e.id === 'single-leg-balance');
 
-  expect(deadbug.done.length).toBe(3);
-  expect(deadbug.done[0].reps).toBeGreaterThan(0);
-  expect(plank.done.length).toBe(1);
-  expect(plank.done[0].seconds).toBeGreaterThan(0);
+  expect(crunch.done.length).toBe(2);
+  expect(crunch.done[0].reps).toBeGreaterThan(0);
+  expect(crunch.done[0].weightKg).toBe(20);
+  expect(balance.done.length).toBe(1);
+  expect(balance.done[0].seconds).toBeGreaterThan(0);
   expect(errors).toEqual([]);
 });
 
-test('back-off loads recalculate from the top set actually hit', async ({ page }) => {
+test('core rides at the end of Lower, behind a divider, and counts as a core session once logged', async ({ page }) => {
   await boot(page);
-  await startVia(page, 'Upper Push'); // incline bench, top set + back-offs
+  await startVia(page, 'Lower + Pull Volume');
+  await expect(page.locator('.exnav-divider')).toHaveText(/core/i);
+  await expect(page.locator('.exnav button[data-group="core"]')).toHaveCount(5);
 
-  // Set an explicit top-set load, then log it.
-  await page.evaluate(() => {
-    const s = window.__store?.activeSession?.();
-    void s;
+  await page.locator('.exnav button', { hasText: 'Cable Crunch' }).click();
+  await page.locator('button', { hasText: /^Log set$/ }).click();
+  await page.waitForTimeout(200);
+
+  await page.locator('button', { hasText: /^Finish$/ }).click();
+  await page.locator('.sheet button', { hasText: /^Finish$/ }).click();
+
+  const core = await page.evaluate(async () => {
+    const store = await import('./src/data/store.js');
+    return store.cursors().core.completed;
   });
+  expect(core).toBe(1);
+});
+
+test('the probe sets the block reference and fills the back-offs at 80% of it', async ({ page }) => {
+  await boot(page);
+  await startVia(page, 'Upper Push'); // incline bench: probe, then back-offs
+
+  await expect(page.locator('.setrow-sub').first()).toContainText('PROBE');
 
   const plus = page.locator('.stepper').nth(0).locator('button', { hasText: '+' });
   for (let i = 0; i < 32; i++) await plus.click(); // 32 x 2.5kg = 80kg
+  // Reps are prefilled at 4; rate it RPE 8 → e1RM 80 × (1 + 6/30) = 96.
+  await page.locator('.chips').last().locator('.chip', { hasText: /^8$/ }).click();
 
   await page.locator('button', { hasText: /^Log set$/ }).click();
   await page.waitForTimeout(300);
@@ -133,12 +156,20 @@ test('back-off loads recalculate from the top set actually hit', async ({ page }
     const store = await import('./src/data/store.js');
     const s = store.activeSession();
     const entry = s.entries[0];
-    const top = entry.sets.find((x) => x.type === 'top');
+    const probe = entry.sets.find((x) => x.type === 'probe');
     const backoffs = entry.sets.filter((x) => x.type === 'backoff');
-    return { top: top.weightKg, backoffs: backoffs.map((b) => b.weightKg) };
+    return {
+      probe: probe.weightKg,
+      rpe: probe.rpe,
+      backoffs: backoffs.map((b) => b.weightKg),
+      reference: s.prescriptionSnapshot.entries[0].reference?.e1rm,
+    };
   });
 
-  expect(result.top).toBe(80);
-  // 85% of 80 = 68, snapped to the 2.5kg grid.
-  for (const b of result.backoffs) expect(b).toBe(67.5);
+  expect(result.probe).toBe(80);
+  expect(result.rpe).toBe(8);
+  expect(result.reference).toBe(96);
+  // 80% of 96 = 76.8, snapped to the 2.5kg grid.
+  expect(result.backoffs).toEqual([77.5, 77.5, 77.5]);
+  await expect(page.locator('text=Block reference e1RM 96')).toBeVisible();
 });

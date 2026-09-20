@@ -40,17 +40,19 @@ explicitly at startup, not just `updatefound`.
 
 ## The program
 
+Version 3. The design was re-derived by a five-agent research pass (four specialist coaches, one adversarial reviewer) and the result is in [research/SYNTHESIS.md](research/SYNTHESIS.md) — every number below cites a section there. The athlete brief the research was written against is [research/BRIEF.md](research/BRIEF.md).
+
 ### Week
 
 | Day | Session | Why here |
 |---|---|---|
-| Mon | **Lower + Pull Volume** | Legs early, maximum distance before Saturday's long run |
-| Tue | **Easy run** + core | Day after legs; easy running is active recovery |
-| Wed | **Upper Push** — incline bench heavy | |
-| Thu | Rest, or optional **bonus delt/arm** day / second easy run | The "5th session" slot. Never mandatory |
-| Fri | **Upper Pull** — weighted pull-up heavy + core | |
-| Sat | **Long run** + core | Fresh legs, five days clear of lower day |
-| Sun | **Shoulders & Arms** — OHP heavy | Upper only, so long-run fatigue is irrelevant |
+| Mon | **Lower + Pull Volume** + core | Legs early, maximum distance before Saturday's long run |
+| Tue | **Easy run** (30 min) | Day after legs; whether that stays is decided from your own logged effort (§4.3) |
+| Wed | **Upper Push** — incline bench heavy, + core | |
+| Thu | Rest, or optional **bonus delt/arm** day / second easy run | Rest by default in test weeks and once the long run is 8 km+ |
+| Fri | **Upper Pull** — weighted pull-up heavy | |
+| Sat | **Long run** (+ optional core) | Fresh legs, five days clear of lower day |
+| Sun | **Shoulders & Triceps** — OHP heavy, incline volume | Upper only, so long-run fatigue is irrelevant |
 
 Those *days* are only a suggestion — miss a Wednesday, train out of order, train on a Sunday instead, and the schedule engine follows what you actually do (see *How the schedule works*).
 
@@ -62,60 +64,59 @@ Each gets **one heavy exposure and one volume exposure** per week:
 
 | Lift | Heavy | Volume |
 |---|---|---|
-| Incline barbell bench | Wed — top set 4–6, then 3×6 @ 85% | Sun — 3×8–12 |
-| Overhead press | Sun — top set 4–6, then 3×6 @ 85% | Wed — 3×8–10 |
-| Weighted pull-up | Fri — top set 4–6, then 3×6 @ 85% | Mon — 3×6–8 |
+| Incline barbell bench (30°) | Wed — probe 1×3–5 @ RPE 8, then 3×4–6 @ 80% of reference | Sun — 3×6–8 @ RPE ≤ 8 |
+| Overhead press (standing) | Sun — probe, then 3×4–6 @ 80% of reference | Wed — 3×6–8 |
+| Weighted pull-up | Fri — probe, then 3×4–6 @ 80% of reference | Mon — 3×5–8 |
 
-Top sets progress by **double progression under an RPE target**: clear the top of the rep range at or under the week's RPE, and the load goes up (2.5kg on the bars, 1.25kg on pull-ups). Back-off loads are computed from the top set you *actually* hit that day, not the one that was planned.
+The heavy day is **inverted** from the usual top-set logic (§1.1). The first set is a *probe* — an honest 3–5 at RPE 8 — but the working stimulus is the three back-off sets at 80% of a **block reference** e1RM, never derived from that day's top set (the least reliably rated set in the session, Helms 2017). By the app's own RPE-adjusted Epley, 4–6 reps at 80% is RPE 6.5 → 8.5, and a unit test asserts every generated back-off lies in that band. The reference moves only on evidence: a later probe at ≤ RPE 8 that beats it, or every back-off set reaching 6 at ≤ RPE 8.5 — then the bar moves by exactly one increment (2.5 kg incline, dropping to 1.25 after two stalls; 1.25 kg OHP and pull-up). The test week's RPE-9 triple sets the *next* block's reference. Pull-up references and percentages are computed on **system mass** — bodyweight plus belt — which is why pull-up days ask for your bodyweight first.
 
-### Mesocycle — 5 weeks
+### Mesocycle — 4 weeks during the 10K build, 5 after
 
-| Week | Accessory sets | Top-set RPE | Load |
-|---|---|---|---|
-| 1 | baseline | 7.5 | — |
-| 2 | +1 on delts/arms | 8 | — |
-| 3 | +1 more | 8.5 | — |
-| 4 | peak | 9 | — |
-| 5 | **deload** — half | ≤6 | ×0.85 |
+Weeks have **roles**, not numbers:
 
-Weekly direct sets on the priority muscles run 8 → 14 across the block for side delts, triceps and biceps, and 6 → 10 for rear delts — landing near the top of Renaissance Periodization's MAV band in week 4, then deloading.
+| Role | Heavy day | Accessories |
+|---|---|---|
+| probe | probe @ RPE 8, 3×4–6 @ 80% | RPE 8–9, last set of each isolation exercise to RPE 10 |
+| test (last loading week) | 1×3 @ RPE 9 — sets next block's reference | same |
+| deload | 1×3 @ RPE 6, **2×4 @ 80%** — same percentage, fewer sets | half the sets, 90% load |
 
-### Running — 14 weeks to 10K
+During the 10K build the lifting week **is** the running week (as of Monday), so lifting deloads land on the running down-weeks — run weeks 8, 12 and 16 (§4.4). A down-week with fewer than two loading weeks before it is skipped. If no long run is logged for 14 days the lift count takes over so the block cannot freeze; after the build, blocks are five weeks on the lift count.
 
-Two runs a week (easy Tuesday, long Saturday), plus an optional third on Thursday. Everything is Zone 2 / conversational.
+Accessory volume is **flat**: ~8–10 direct sets per week each for side delts, triceps and biceps, 6 for rear delts, held across the block (§2.1, §2.2). No ramp — the trained-lifter trials nearest this volume found no benefit from adding sets, and the ramp stacked a volume peak on an effort peak. Legs are maintenance (~10 sets, one unilateral pattern kept for the running). The bonus day is two sets each, nothing to failure, probe weeks only.
 
-Weeks 1–4 are **time**-based on purpose; chasing distance before you have tissue tolerance is how beginners get hurt. Distance targets take over from week 5. Long runs: 6.0 → 6.5 → 7.0 → *5.0 down* → 7.5 → 8.0 → 8.5 → *6.0 down* → 9.3 → **10.0**.
+### Running — 15 weeks to 10K
 
-No long run ever exceeds ~110% of the longest run in the previous 30 days, and the app warns you if you try to log one that does.
+Two runs a week (easy Tuesday, long Saturday), plus an optional third on Thursday. Every run is easy: **CR10 effort 3–4 and a passed talk test**, both logged after every run — they are the one training variable that tracked injury in novice runners, and they decide whether the Tuesday run stays on Tuesday.
 
-### Core — 3 phases
+Weeks 1–4 are **time**-based on purpose. From week 5 the long run is distance-based and the easy run stays 30 minutes: 5.5 → 6.0 → 6.5 → *5.5 down* → 7.0 → 7.5 → 8.0 → *6.5 down* → 8.5 → 9.3 → **10.0**. Every step is ≤ 9% of the longest run so far and no weekly total rises more than ~20%.
 
-Phases advance on **core sessions completed**, not on the calendar.
+The app checks two rails on every run, planned or just logged, GPS or typed: a single run more than **10%** over the 30-day longest (Frandsen 2025 — a dose–response, not a threshold, and *associated with* more injuries rather than the main driver), and a weekly total more than 30% over the previous week (Nielsen 2014). A previous lower-limb running injury — asked once — turns those warnings into stops. After the 10K: one 7–8 km easy run and one 4–5 km with strides.
 
-1. **Motor control** (sessions 0–11) — McGill Big 3: dead bug, bird dog, side plank, front plank.
-2. **Capacity** (12–26) — longer holds, Pallof press, hanging knee raises.
-3. **Loaded** (27+) — ab wheel, hanging leg raises, cable crunches, weighted planks.
+### Core — loaded, at the end of Lower and Push
 
-No loaded spinal flexion until bracing endurance exists. The ab wheel is gated on a clean 60-second plank.
+The mat programme was skipped, so it went. Core is now cable and bench work — one anti-extension, one anti-rotation, one anti-lateral movement plus gym-based foot work — and it rides at the end of the two shortest gym days rather than on its own (§5.4). Phases advance on core sessions completed (0 / 8 / 16): cable crunch, Pallof press and suitcase carries first; ab-wheel, woodchops and Copenhagen planks next; hanging leg raises, landmine rotations and heavier carries last. **Completion is tracked**; under 75% and the placement is wrong, not you.
 
 ---
 
 ## The research behind it
 
+The current basis is [research/SYNTHESIS.md](research/SYNTHESIS.md), with the four specialist reports and the reviewer's audit alongside it. The table below keeps the decisions that survived that pass and records where the earlier reasoning did not.
+
 | Decision | Basis |
 |---|---|
-| One heavy + one volume exposure per lift, not 3–4 | Grgic et al. 2018 meta-analysis: the frequency effect **disappears** once weekly volume is equated (p=0.421). Colquhoun 2018: 3× vs 6×/week bench, volume-matched, no difference. |
-| Daily undulating periodization + RPE autoregulation | DUP favoured over linear for trained lifters (Rhea 2002). RPE/RIR scale validated by Zourdos 2016; operationalised by Tuchscherer's RTS. |
-| Not conjugate / Westside | Nuckols, *Why I Wouldn't Westside* — insufficient volume and lift-specificity for raw natural lifters. |
-| Side delts get the most accessory volume | RP volume landmarks (MEV 6, MAV 24). Least stimulated by pressing and pulling — whereas front delts and biceps are already covered by OHP and pull-ups, so they get less direct work by design. |
-| Overhead triceps extensions are mandatory | The long head is only loaded in the stretched position; overhead extensions beat pushdowns for long-head *and* total triceps growth. |
-| Stretch-biased curls (incline, preacher, Bayesian) | Preacher curls produce more distal bicep growth than incline curls via greater stretch loading; cable keeps tension where dumbbells go slack. |
-| 5-week block (4 + deload) | RP: deload every 4–6 weeks. Helms: 6–9, autoregulated. Five suits a 4-lift + 3-run week. |
-| Adjacent days share no primary muscle | Not because consecutive-day training is harmful — a 12-week volume-matched RCT found 24h vs 48–72h recovery made **no** difference to strength or size (p=0.075–0.974), and Schoenfeld/Grgic show frequency is volume-neutral. The reason is narrower: a heavy top set is worth less on a pre-fatigued muscle, and top sets are what drive all three goals. |
-| Curls on lower day | The only slot in the cycle that neighbours nothing else pulling. Arm work does not interfere with legs, and it keeps biceps volume split across two non-adjacent days rather than piled into one session. |
-| Long run kept 3+ days from lower day; all easy running Zone 2 | Wilson et al. 2012: interference scales with endurance **frequency and duration**, and running interferes more than cycling. Petré 2021 / Schumann 2022: the effect largely vanishes when the modalities sit on different days. Lift before run if they share a day. |
-| Single-run distance capped at ~110% of the recent longest | Aarhus / BJSM 2025 (5,205 runners, 588k sessions): injury risk tracks **single-session spikes**, not weekly totals. A >100% jump carried 128% higher hazard. Better evidence than the folklore 10% rule. |
-| Core starts with McGill Big 3 | Bracing endurance before any loaded spinal flexion. |
+| One heavy + one volume exposure per lift, not 3–4 | Grgic et al. 2018 meta-analysis: the frequency effect **disappears** once weekly volume is equated. Colquhoun 2018: 3× vs 6×/week bench, volume-matched, no difference. Two exposures are kept for the per-session volume ceiling, not for frequency itself. |
+| Probe + reference back-offs instead of top set + derived back-offs | Androulakis-Korakakis 2021: an RPE-9 single alone did nothing; the same single plus back-offs at a fixed percentage did. Carroll 2019: daily rep maxes produced worse strength than submaximal relative-intensity work. v2's back-offs at 85% of an RPE-7.5 top set were ~66–74% 1RM — sub-threshold for a trained lifter. |
+| Fixed progression ceiling, not a rising weekly RPE | Robinson 2024: strength gain is insensitive to proximity to failure across a wide RIR range; a rising ceiling clusters load increases on the fatigue-inflated last week. |
+| Flat accessory volume, last set to failure | Enes JAP 2024 / Moreno 2024: in trained lifters near this volume, holding sets matched adding 30–60%. Refalo 2024: 1–2 RIR matched failure for growth with less velocity loss; the small failure-subgroup benefit in Grgic 2022 is why the last set still goes there. |
+| Pull-up loads on system mass | Muñoz-López 2017, Sánchez-Moreno 2017: load–%1RM relationships hold on bodyweight + load and are wrong by a large factor on belt load alone. |
+| Legs to maintenance, one lunge kept | Muscle is held on ~a third of building volume (Spiering 2021). Six of the eight slots in the one positive novice-runner injury-prevention RCT (Leppänen 2024) were hip and lunge work. |
+| Adjacent days share no primary muscle | Not because consecutive-day training is harmful: the RCT once cited for this (Yang 2018) was 30 resistance-*untrained* men, lifting only. The reason is narrower — a heavy exposure is worth less on a pre-fatigued muscle, and those exposures drive all three goals. |
+| Lifting deloads on the running down-weeks | On the old offset the RPE-9 week landed on the 10K and lifting deloads missed both running down-weeks — recovery paid for twice, out of phase. Fatigue is systemic; upper-body work is not impaired by running (Huiberts 2024, Sporer & Wenger 2003). |
+| Weekly template kept, decided from data | The rotation proposed in research rested on a misread of Doma & Deakin 2013 (same-day strength *and* running) and was withdrawn. The athlete's own Tuesday-run effort decides it after one block. |
+| Every run easy; spike rail at 10%; weekly rail at 30% | Frandsen 2025 (5,205 runners): > 10% over the 30-day longest, HRR 1.64, as a dose–response. Nielsen 2014: > 30% weekly jumps. Kluitenberg 2016: higher prior-week RPE → more injury. Bone fatigue life halves per 10% rise in strain, and speed raises strain more than distance (Warden 2021). |
+| Interference is not the threat it was treated as | Schumann 2022: pooled interference on strength and hypertrophy ≈ 0. Wilson 2012's running-vs-cycling modality finding did not replicate. Nobody in the literature is a 10-year lifter, so the transfer is unknown. |
+| Loaded core, no mat phase | No evidence requires a floor-based bracing phase before loaded trunk work in a healthy strong lifter — the gate is borrowed from LBP rehabilitation. Adherence is the binding constraint: a done loaded programme beats a skipped mat one by the whole effect size. If low-back symptoms ever appear, this flips to McGill-style isometrics regardless. |
+| No RP volume landmarks | The MEV/MAV numbers the earlier version cited are unmeasured expert opinion; the RP article cites no studies. Weekly targets are now the synthesis's direct-set bands. |
 
 ---
 
@@ -163,14 +164,21 @@ Mon/Wed/Fri/Sun template is only 24 hours — shares nothing meaningful:
 ```
 Lower  →  Push        nothing
 Push   →  Pull        nothing   (antagonists)
-Pull   →  Delts/Arms  rear delts only, 3 light isolation sets
+Pull   →  Delts       rear delts only, 3 light isolation sets
 Delts  →  Lower       nothing   ← the 24h gap
 ```
 
 `tests/unit/split.test.mjs` asserts this on every run, with a deliberately narrow
 allowlist for the rear-delt case. Reordering `liftCycle` or moving an exercise
 between days fails the suite rather than quietly reintroducing back-to-back
-pull-ups.
+pull-ups. Core is attached to Lower and Push at resolution time and does not
+count — it is low-fatigue tail work 48 hours apart.
+
+A title that does not match its exercises is a different kind of fault, and one
+that memory is bad at. Every logged lift session is checked on read against the
+program version it ran under (`sessionIntegrity` in `core/schema.js`): day key,
+title and exercise list must agree, allowing for swaps and additions. A mismatch
+shows as a pill in History and a banner on the session — never as a silent fix.
 
 The schedule is cursor-driven, though, so falling behind can still compress a 48h
 gap into 24h. The Today screen therefore checks the session it is about to offer
@@ -289,12 +297,14 @@ The DOM-free rule on `src/core/` is what makes the schedule and progression logi
 
 ### Editing the program
 
-`src/program/program.v1.js` is static content and is never written at runtime. Edit it freely — every logged session stores a frozen `prescriptionSnapshot` plus the program version it ran under, so changing the program can never retroactively rewrite what past sessions said to do.
+`src/program/program.v3.js` is static content and is never written at runtime (`program.v1.js` carries version 2 and stays as the record older sessions ran under). Edit it freely — every logged session stores a frozen `prescriptionSnapshot` plus the program version it ran under, so changing the program can never retroactively rewrite what past sessions said to do.
 
 Two rules: **bump `version` on any edit**, and reference exercises by their permanent slug. Never rename an `id` or delete an exercise — set `retired: true` so old sessions still render.
+
+Program changes go through the research team in `.claude/agents/` (four Sonnet specialists, one Opus reviewer) and land in `research/SYNTHESIS.md` before they land here; `research/REVIEW.md` shows what that step catches.
 
 ### Two things to be careful with
 
 - **`updateViaCache: 'none'`** on the service worker registration. GitHub Pages serves `sw.js` with `max-age=600`; without that flag the browser checks a cached copy of the worker and deploys land unpredictably.
-- **Progression lookups are scoped by `dayKey` and skip deloads.** Both filters exist because of bugs that silently destroy progression: without the day scope the heavy day reads the volume day's sets, finds no top set, and restarts from scratch; without the deload filter, the session after a deload treats the deliberately-light deload load as the new baseline and resets you ~15% backwards every block. Moving an exercise between days hits the same trap — use `historyAliasDayKey`.
+- **Progression lookups are scoped by `dayKey` and skip deloads.** Both filters exist because of bugs that silently destroy progression: without the day scope the heavy day reads the volume day's sets, finds no probe, and restarts from scratch; without the deload filter, the session after a deload treats the deliberately-light deload load as the new baseline and resets you ~15% backwards every block. Moving an exercise between days hits the same trap — use `historyAliasDayKey`.
 - **Never snap typed input to the stepper grid.** Doing so turned an entered 6.25 into 7.5, i.e. the app logging a weight that was never lifted. `+`/`−` moves *by* the step from wherever the value is; only float drift is rounded away.

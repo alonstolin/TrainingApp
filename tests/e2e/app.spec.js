@@ -15,6 +15,15 @@ const boot = async (page) => {
   await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
 };
 
+/**
+ * Days with a weighted pull-up ask for bodyweight before the session opens
+ * (SYNTHESIS §1.5). Accept the sheet when it appears; otherwise carry on.
+ */
+async function acceptBodyweight(page) {
+  const use = page.locator('.sheet button', { hasText: 'Use this weight' });
+  if (await use.isVisible().catch(() => false)) await use.click();
+}
+
 test('boots with no console errors and shows today', async ({ page }) => {
   const errors = watchErrors(page);
   await boot(page);
@@ -47,6 +56,7 @@ test('logs a full lift session end to end and it survives a reload', async ({ pa
   const start = page.locator('button.btn--xl').first();
   await expect(start).toBeVisible();
   await start.click();
+  await acceptBodyweight(page);
 
   await expect(page.locator('.screen--session')).toBeVisible();
 
@@ -160,6 +170,7 @@ test('export produces a valid backup that round-trips through import', async ({ 
 
   // Log something so there is data worth backing up.
   await page.locator('button.btn--xl').first().click();
+  await acceptBodyweight(page);
   const plus = page.locator('.stepper button', { hasText: '+' }).first();
   for (let i = 0; i < 8; i++) await plus.click();
   await page.locator('button', { hasText: /^Log set$/ }).click();

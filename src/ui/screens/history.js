@@ -4,8 +4,9 @@ import { el, onTap, append, fmtSets } from '../dom.js';
 import * as store from '../../data/store.js';
 import { startOfWeek, formatDate, formatRelativeDate, dayName, formatDuration } from '../../core/dates.js';
 import { adherence } from '../../core/stats.js';
-import { formatPace } from '../../core/progression.js';
-import { paceSecPerKm } from '../../core/progression.js';
+import { formatPace, paceSecPerKm } from '../../core/progression.js';
+import { sessionIntegrity } from '../../core/schema.js';
+import { getProgram } from '../../program/index.js';
 import { navigate } from '../../router.js';
 
 const summarise = (s) => {
@@ -97,6 +98,11 @@ export default function mountHistory(root) {
                 el('div.listitem-title', { text: s.prescriptionSnapshot?.name ?? s.kind }),
                 el('div.listitem-sub.truncate', { text: summarise(s) }),
               ),
+              // A title that does not match its exercises is exactly the kind
+              // of thing that should be visible here, not remembered.
+              s.kind === 'lift' && !sessionIntegrity(s, getProgram(s.programRef?.version)).ok
+                ? el('span.pill.pill--warn', { text: 'MISMATCH', dataset: { integrity: 'mismatch' } })
+                : null,
               el(
                 'span.xs.dim',
                 { style: { textAlign: 'right', flex: '0 0 auto' } },

@@ -84,7 +84,7 @@ test('the upcoming week lists the real session names in program order', async ({
   const titles = await page.locator('.listgroup .listitem-title').allTextContents();
   const joined = titles.join(' | ');
   // Whatever today is, a full week must contain each lift day exactly once.
-  for (const name of ['Lower', 'Upper Push', 'Upper Pull', 'Shoulders & Arms']) {
+  for (const name of ['Lower', 'Upper Push', 'Upper Pull', 'Shoulders & Triceps']) {
     expect(joined).toContain(name);
   }
   expect(joined).toContain('Long Run');

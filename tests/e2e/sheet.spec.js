@@ -159,6 +159,9 @@ test('tapping a row still works after the drag handlers are attached', async ({ 
   await openSheet(page);
 
   await page.locator('.sheet .listitem').first().click();
+  // The first row is Lower, which asks for bodyweight before it opens.
+  const use = page.locator('.sheet button', { hasText: 'Use this weight' });
+  if (await use.isVisible().catch(() => false)) await use.click();
   await expect(page.locator('.screen--session')).toBeVisible();
   await expect(page.locator('.sheet')).toHaveCount(0);
 });

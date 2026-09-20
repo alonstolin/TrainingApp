@@ -18,7 +18,7 @@ const completed = (sessions) =>
  * zigzag between two unrelated loads that reads as wild week-to-week swings.
  * The heavy exposure is the strength signal, so strength charts use only it.
  */
-const hasTopSet = (entry) => (entry.sets ?? []).some((x) => x.done && x.type === 'top');
+const hasTopSet = (entry) => (entry.sets ?? []).some((x) => x.done && (x.type === 'top' || x.type === 'probe'));
 
 /**
  * Estimated 1RM over time for one exercise, one point per session.
@@ -132,8 +132,8 @@ export function coreSeries(sessions, exerciseId) {
   const isTime = ex.metric === 'time';
   const out = [];
   for (const s of completed(sessions)) {
-    if (s.kind !== 'core') continue;
-    const entry = s.entries?.find((e) => e.exerciseId === exerciseId);
+    // Standalone core sessions and core work attached to a lift day both count.
+    const entry = s.entries?.find((e) => e.exerciseId === exerciseId && (s.kind === 'core' || e.group === 'core'));
     if (!entry) continue;
     let best = 0;
     for (const set of entry.sets ?? []) {
@@ -162,6 +162,54 @@ export function weeklyVolumeByMuscle(sessions, weekStartDate) {
   return [...counts.entries()]
     .map(([muscle, sets]) => ({ muscle, label: MUSCLE_LABELS[muscle] ?? muscle, sets }))
     .sort((a, b) => b.sets - a.sets);
+}
+
+/**
+ * Core adherence: of the lift sessions that carry core work at the end, how
+ * many actually logged any of it? Below 75% the placement is wrong again
+ * (SYNTHESIS §5.4) — the mat programme failed the same way.
+ */
+export function coreAdherence(sessions, program, { since = null } = {}) {
+  const attach = new Set(program.core?.attachTo ?? []);
+  if (attach.size === 0) return null;
+  const hosts = completed(sessions).filter(
+    (s) => s.kind === 'lift' && attach.has(s.dayKey) && (!since || s.date >= since) &&
+      (s.entries ?? []).some((e) => e.group === 'core'),
+  );
+  const done = hosts.filter((s) =>
+    (s.entries ?? []).some((e) => e.group === 'core' && (e.sets ?? []).some((x) => x.done)),
+  );
+  const standalone = completed(sessions).filter((s) => s.kind === 'core' && (!since || s.date >= since)).length;
+  return {
+    hosts: hosts.length,
+    done: done.length,
+    pct: hosts.length ? Math.round((done.length / hosts.length) * 100) : null,
+    standalone,
+    ok: hosts.length === 0 || done.length / hosts.length >= 0.75,
+  };
+}
+
+/**
+ * Easy-run effort by weekday — the data that decides whether the Tuesday run
+ * (the day after legs) stays on Tuesday (SYNTHESIS §4.3). CR10 and Talk Test.
+ */
+export function easyRunEffortByWeekday(sessions, { since = null } = {}) {
+  const out = {};
+  for (const s of completed(sessions)) {
+    if (s.kind !== 'run' || s.variant !== 'easy' || !s.run) continue;
+    if (since && s.date < since) continue;
+    const dow = new Date(Number(s.date.slice(0, 4)), Number(s.date.slice(5, 7)) - 1, Number(s.date.slice(8, 10))).getDay();
+    const row = (out[dow] ??= { dow, runs: 0, rpeSum: 0, rpeN: 0, talkNo: 0, talkN: 0 });
+    row.runs++;
+    if (s.run.effort) { row.rpeSum += s.run.effort; row.rpeN++; }
+    if (s.run.talkTest) { row.talkN++; if (s.run.talkTest === 'no') row.talkNo++; }
+  }
+  return Object.values(out).map((r) => ({
+    dow: r.dow,
+    runs: r.runs,
+    meanRpe: r.rpeN ? Math.round((r.rpeSum / r.rpeN) * 10) / 10 : null,
+    talkNegativePct: r.talkN ? Math.round((r.talkNo / r.talkN) * 100) : null,
+  }));
 }
 
 /** All-time bests for an exercise. */

@@ -34,17 +34,20 @@ test('lift cursor cycles B → A → C → D → B', () => {
   assert.deepEqual(seen, ['lift:B', 'lift:A', 'lift:C', 'lift:D', 'lift:B']);
 });
 
-test('mesocycle week is driven by sessions completed, NOT by the calendar', () => {
-  // This is the whole point of the cursor model: week 4's peak volume must
-  // arrive after 12 lift sessions, not after 28 days have elapsed.
-  assert.equal(deriveCursors(completedLifts(0), program).weekInMeso, 1);
-  assert.equal(deriveCursors(completedLifts(3), program).weekInMeso, 1);
-  assert.equal(deriveCursors(completedLifts(4), program).weekInMeso, 2);
-  assert.equal(deriveCursors(completedLifts(11), program).weekInMeso, 3);
-  assert.equal(deriveCursors(completedLifts(12), program).weekInMeso, 4);
-  assert.equal(deriveCursors(completedLifts(16), program).weekInMeso, 5, 'deload week');
-  assert.equal(deriveCursors(completedLifts(20), program).weekInMeso, 1, 'new block');
-  assert.equal(deriveCursors(completedLifts(20), program).mesocycle, 2);
+test('with no running, the mesocycle week is driven by sessions completed, NOT by the calendar', () => {
+  // This is the whole point of the cursor model: the deload must arrive after
+  // twelve lift sessions, not after 21 days have elapsed. (During the 10K build
+  // the lifting week follows the RUN week instead — see meso.test.mjs.)
+  const at = (n) => deriveCursors(completedLifts(n), program, { today: '2026-03-01' });
+  assert.equal(at(0).weekInMeso, 1);
+  assert.equal(at(3).weekInMeso, 1);
+  assert.equal(at(4).weekInMeso, 2);
+  assert.equal(at(8).weekInMeso, 3);
+  assert.equal(at(8).role, 'test');
+  assert.equal(at(12).weekInMeso, 4, 'deload week');
+  assert.equal(at(12).isDeload, true);
+  assert.equal(at(16).weekInMeso, 1, 'new block');
+  assert.equal(at(16).mesocycle, 2);
 });
 
 test('skipping advances the cycle but NOT the mesocycle week', () => {
@@ -93,12 +96,18 @@ test('a skipped long run repeats the week rather than skipping ahead', () => {
   assert.equal(deriveCursors(sessions, program).run.week, 1);
 });
 
-test('core phase is gated on completed core sessions', () => {
+test('core phase is gated on completed core sessions — standalone or attached to a lift day', () => {
   const core = (n, status = 'completed') =>
     Array.from({ length: n }, () => mkSession({ kind: 'core', status }));
   assert.equal(deriveCursors(core(0), program).core.completed, 0);
   assert.equal(deriveCursors(core(12), program).core.completed, 12);
   assert.equal(deriveCursors(core(5, 'skipped'), program).core.completed, 0);
+
+  const withCore = mkSession({ kind: 'lift', dayKey: 'lift:B', status: 'completed',
+    entries: [{ entryId: 'e0', exerciseId: 'back-squat', sets: [{ done: true, reps: 5 }] }, { entryId: 'e9', exerciseId: 'cable-crunch', group: 'core', sets: [{ done: true, reps: 12 }] }] });
+  const skippedCore = mkSession({ kind: 'lift', dayKey: 'lift:B', status: 'completed',
+    entries: [{ entryId: 'e0', exerciseId: 'back-squat', sets: [{ done: true, reps: 5 }] }, { entryId: 'e9', exerciseId: 'cable-crunch', group: 'core', sets: [] }] });
+  assert.equal(deriveCursors([withCore, skippedCore], program).core.completed, 1, 'only the lift that actually did its core counts');
 });
 
 test('Today serves the calendar slot when you are on schedule', () => {
@@ -118,33 +127,50 @@ test('Today serves what you OWE, not what the calendar says, when you are behind
   assert.ok(today.drift.lift >= 1, 'and it reports being behind');
 });
 
-test('Thursday is a rest day with both extras offered', () => {
+test('Thursday is a rest day with both extras offered in a probe week', () => {
   const today = resolveToday(emptyState(), program, THU);
   assert.equal(today.isRestDay, true);
   assert.equal(today.primary, null);
+  assert.equal(today.restByDefault, false);
   const keys = today.optional.map((o) => o.slotKey).sort();
   assert.deepEqual(keys, ['lift:E', 'run:easy']);
 });
 
-test('Saturday leads with the long run and also offers core', () => {
+test('in the test week Thursday is rest by default and the bonus day is withdrawn', () => {
+  const t = resolveToday(st(completedLifts(8)), program, THU); // lift-count clock: week 3 = test
+  assert.equal(t.role, 'test');
+  assert.equal(t.restByDefault, true);
+  assert.deepEqual(t.optional.map((o) => o.slotKey), ['run:easy'], 'lift:E is not offered outside probe weeks');
+});
+
+test('Saturday leads with the long run; core is optional, not owed', () => {
   const today = resolveToday(emptyState(), program, SAT);
   assert.equal(today.primary.key, 'run:long');
-  assert.deepEqual(today.also.map((c) => c.key), ['core']);
+  assert.deepEqual(today.also, []);
+  assert.deepEqual(today.optional.map((c) => c.key), ['core']);
 });
 
-test('Tuesday leads with the easy run, core second', () => {
+test('Tuesday is the easy run and nothing else — core lives at the end of Lower and Push now', () => {
   const today = resolveToday(emptyState(), program, TUE);
   assert.equal(today.primary.key, 'run:easy');
-  assert.deepEqual(today.also.map((c) => c.key), ['core']);
+  assert.deepEqual(today.also, []);
 });
 
-test('Friday leads with the lift, core second', () => {
+test('Friday leads with the lift and nothing else', () => {
   const t = resolveToday(st(completedLifts(2)), program, FRI);
   assert.equal(t.primary.track, 'lift');
-  assert.deepEqual(t.also.map((c) => c.key), ['core']);
+  assert.deepEqual(t.also, []);
 });
 
-test('Sunday serves Shoulders & Arms when on schedule', () => {
+test('Lower and Push carry core entries at the end; Pull and Delts do not', () => {
+  const mon = resolveToday(emptyState(), program, MON);
+  assert.ok(mon.primary.session.entries.some((e) => e.group === 'core'));
+  const fri = resolveToday(st(completedLifts(2)), program, FRI);
+  assert.equal(fri.primary.key, 'lift:C');
+  assert.ok(!fri.primary.session.entries.some((e) => e.group === 'core'));
+});
+
+test('Sunday serves Shoulders & Triceps when on schedule', () => {
   const t = resolveToday(st(completedLifts(3)), program, SUN);
   assert.equal(t.primary.key, 'lift:D');
   assert.equal(t.primary.offSchedule, false);
@@ -186,10 +212,18 @@ test('drift is zero when you are keeping up', () => {
 });
 
 test('deload week is flagged on the Today payload', () => {
-  const t = resolveToday(st(completedLifts(16)), program, MON);
-  assert.equal(t.weekInMeso, 5);
+  const t = resolveToday(st(completedLifts(12)), program, MON);
+  assert.equal(t.weekInMeso, 4);
+  assert.equal(t.role, 'deload');
   assert.equal(t.isDeload, true);
   assert.match(t.weekNote, /DELOAD/);
+  assert.equal(t.primary.session.isDeload, true);
+});
+
+test('the lift card resolves with the block role, the athlete\'s bodyweight and gym', () => {
+  const t = resolveToday(st([], { bodyweightKg: 84, lastGymId: 'g1' }), program, MON);
+  assert.equal(t.primary.session.role, 'probe');
+  assert.equal(t.primary.session.gymId, 'g1');
 });
 
 test('alternatives offer every session, with what you owe first', () => {

@@ -139,7 +139,7 @@ export function fmtSets(sets, { max = 5 } = {}) {
   const done = (sets ?? []).filter((s) => s.done);
   if (!done.length) return '—';
   const parts = done.slice(0, max).map((s) => {
-    if (s.seconds != null) return `${s.seconds}s`;
+    if (s.seconds != null) return s.weightKg ? `${fmtWeight(s.weightKg)}×${s.seconds}s` : `${s.seconds}s`;
     const w = s.weightKg != null && s.weightKg !== 0 ? fmtWeight(s.weightKg) : null;
     const core = w ? `${w}×${s.reps ?? '?'}` : `${s.reps ?? '?'} reps`;
     return s.rpe ? `${core} @${s.rpe}` : core;

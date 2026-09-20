@@ -2,29 +2,79 @@
 
 import { el, onTap, append, fmtSets } from '../dom.js';
 import { openSheet } from '../sheet.js';
+import { stepper } from '../stepper.js';
 import { toast } from '../toast.js';
 import { unlockAudio } from '../timer.js';
 import * as store from '../../data/store.js';
 import { CURRENT_PROGRAM } from '../../program/index.js';
 import { MUSCLE_LABELS } from '../../program/exercises.js';
-import { resolveToday, alternatives, longestRecentRunKm, overlapWarning } from '../../core/schedule.js';
-import { checkRunSpike } from '../../core/progression.js';
+import { resolveToday, alternatives, overlapWarning } from '../../core/schedule.js';
+import { runLoadWarnings } from '../../core/progression.js';
+import { getExercise } from '../../program/exercises.js';
 import { backupNudge } from '../../data/backup.js';
 import { trainingDate, formatRelativeDate, dayName } from '../../core/dates.js';
 import { navigate } from '../../router.js';
 
 const TRACK_LABEL = { lift: 'Lift', run: 'Run', core: 'Core' };
+const ROLE_LABEL = { probe: 'probe week', test: 'test week', deload: 'deload' };
 
-function startAndGo(resolved, extra = {}) {
+function begin(resolved, extra = {}) {
   unlockAudio(); // must happen inside a user gesture or the rest-timer beep stays muted
   const { meta } = store.getState();
   const c = store.cursors();
   const session = store.startSession(resolved, {
     mesocycle: c.mesocycle,
     bodyweightKg: meta.bodyweightKg,
+    gymId: meta.lastGymId ?? null,
     ...extra,
   });
   navigate(`/session/${session.id}`);
+}
+
+/**
+ * Start a session. On days with a bodyweight-plus lift the bodyweight is asked
+ * for first: weighted pull-up strength and every percentage of its reference
+ * are computed on bodyweight + load, so a stale number silently shifts the
+ * prescription (SYNTHESIS §1.5).
+ */
+function startAndGo(resolved, extra = {}) {
+  const needsBw =
+    resolved.kind === 'lift' &&
+    (resolved.entries ?? []).some((e) => getExercise(e.exerciseId).loadModel === 'bodyweight_plus');
+  if (!needsBw) {
+    begin(resolved, extra);
+    return;
+  }
+  const { meta } = store.getState();
+  let kg = meta.bodyweightKg ?? null;
+  const control = stepper({
+    value: kg,
+    step: 0.5,
+    min: 30,
+    max: 250,
+    label: 'kg',
+    // The keypad is itself a sheet, and sheets do not nest — it would replace
+    // this one. Half-kilo steps from the last reading are enough here.
+    allowKeypad: false,
+    onChange: (v) => {
+      kg = v;
+    },
+  });
+  openSheet({
+    title: 'Bodyweight today?',
+    subtitle: 'Pull-up strength is bodyweight plus the belt. Weigh in if you can; otherwise keep the last number.',
+    content: control,
+    actions: [
+      {
+        label: 'Use this weight',
+        onSelect: () => {
+          if (kg != null) store.logBodyweight(kg);
+          begin(resolved, { ...extra, bodyweightKg: kg ?? meta.bodyweightKg ?? null });
+        },
+      },
+      { label: 'Keep last', variant: 'ghost', onSelect: () => begin(resolved, extra) },
+    ],
+  });
 }
 
 function skipCard(card, onDone) {
@@ -85,9 +135,19 @@ function chooseOther(state, onDone) {
             el('div.listitem-title', { text: a.session.name }),
             el('div.listitem-sub.truncate', { text: a.subtitle ?? '' }),
           ),
-          a.isNext ? el('span.pill', { text: 'NEXT' }) : a.optional ? el('span.pill', { text: 'BONUS' }) : null,
+          a.isNext
+            ? el('span.pill', { text: 'NEXT' })
+            : a.unavailable
+              ? el('span.pill.pill--warn', { text: 'NOT THIS WEEK' })
+              : a.optional
+                ? el('span.pill', { text: 'BONUS' })
+                : null,
         ),
         () => {
+          if (a.unavailable) {
+            toast('The bonus day is for probe weeks only — it would push this week past the volume band.');
+            return;
+          }
           close();
           onDone();
           startAndGo(a.session);
@@ -130,14 +190,26 @@ function sessionCard(card, { hero = false } = {}) {
       ? el(
           'ul.stack',
           { style: { marginTop: '0.9rem', gap: '0.25rem' } },
-          ...s.entries.slice(0, 8).map((e) =>
-            el(
-              'li.row-between.small',
-              null,
-              el('span.truncate.grow', { text: e.name }),
-              el('span.dim.num', { text: e.label.replace(/ @ RPE.*/, '') }),
+          ...s.entries
+            .filter((e) => e.group !== 'core')
+            .slice(0, 8)
+            .map((e) =>
+              el(
+                'li.row-between.small',
+                null,
+                el('span.truncate.grow', { text: e.name }),
+                el('span.dim.num', { text: e.label.replace(/ @ RPE.*| · last set.*| · race week.*/, '') }),
+              ),
             ),
-          ),
+          // Core rides at the end of this day; one line, not five.
+          s.entries.some((e) => e.group === 'core')
+            ? el(
+                'li.row-between.small',
+                null,
+                el('span.truncate.grow.muted', { text: `+ Core — phase ${s.corePhase ?? ''}`.trim() }),
+                el('span.dim.num', { text: `${s.entries.filter((e) => e.group === 'core').length} moves` }),
+              )
+            : null,
         )
       : null,
     s.kind === 'core'
@@ -171,19 +243,23 @@ export default function mountToday(root) {
         el('div.eyebrow', { text: `${dayName(today.date)} · ${formatRelativeDate(today.date)}` }),
         el('h1.page-title', { text: today.resume ? 'Session in progress' : today.isRestDay ? 'Rest day' : 'Today' }),
         el('div.page-sub', {
-          text: `Block ${today.mesocycle} · Week ${today.weekInMeso} of ${CURRENT_PROGRAM.mesocycleWeeks}${
-            today.isDeload ? ' · deload' : ''
-          } · Run week ${Math.min(today.runWeek, CURRENT_PROGRAM.runPlan.length)}`,
+          text:
+            today.mesoSource === 'entry-deload'
+              ? `Entry deload · one week, then the first probe week · Run week ${Math.min(today.runWeek, CURRENT_PROGRAM.runPlan.length)}`
+              : `Block ${today.mesocycle} · Week ${today.weekInMeso} of ${today.blockLength ?? CURRENT_PROGRAM.mesocycleWeeks}${
+                  today.role ? ` · ${ROLE_LABEL[today.role] ?? today.role}` : today.isDeload ? ' · deload' : ''
+                } · Run week ${Math.min(today.runWeek, CURRENT_PROGRAM.runPlan.length)}`,
         }),
       ),
     ]);
 
     // ---- mesocycle strip
     const strip = el('div.mesostrip', { style: { marginBottom: '1.25rem' } });
-    for (let w = 1; w <= CURRENT_PROGRAM.mesocycleWeeks; w++) {
+    const blockLength = today.blockLength ?? CURRENT_PROGRAM.mesocycleWeeks;
+    for (let w = 1; w <= blockLength; w++) {
       const stateAttr =
         w === today.weekInMeso ? (today.isDeload ? 'deload' : 'current') : w < today.weekInMeso ? 'done' : 'todo';
-      strip.appendChild(el('span', { dataset: { state: stateAttr } }));
+      strip.appendChild(el('span', { dataset: { state: stateAttr, role: w === blockLength ? 'deload' : w === blockLength - 1 ? 'test' : 'probe' } }));
     }
     screen.appendChild(strip);
 
@@ -206,6 +282,29 @@ export default function mountToday(root) {
             text: 'Set your bodyweight once — weighted pull-up strength is bodyweight plus added load, so without it that number drifts as you do.',
           }),
           onTap(el('button.btn.btn--sm', { type: 'button', text: 'Set' }), () => navigate('/settings')),
+        ),
+      );
+    }
+
+    // ---- one-time: previous lower-limb injury (SYNTHESIS §3.4)
+    if (state.meta.priorLowerLimbInjury == null) {
+      const ask = () =>
+        openSheet({
+          title: 'One question about your running',
+          subtitle:
+            'Have you had a lower-limb running injury before — shin, knee, Achilles or calf, foot? A previous injury is the one predictor found in every novice-runner study, and it makes the distance rules stricter.',
+          actions: [
+            { label: 'Yes, I have', onSelect: () => store.setMeta({ priorLowerLimbInjury: true }) },
+            { label: 'No', onSelect: () => store.setMeta({ priorLowerLimbInjury: false }) },
+            { label: 'Later', variant: 'ghost' },
+          ],
+        });
+      blocks.appendChild(
+        el(
+          'div.banner.banner--info',
+          null,
+          el('span.grow.small', { text: 'One question about previous running injuries sets how cautious the distance rules are.' }),
+          onTap(el('button.btn.btn--sm', { type: 'button', text: 'Answer' }), ask),
         ),
       );
     }
@@ -342,12 +441,30 @@ export default function mountToday(root) {
         }
       }
 
-      // Run spike guard.
+      // Race week: legs light, or none inside 48 h of the 10K (SYNTHESIS §4.4).
+      if (card.track === 'lift' && today.raceWeek && card.session.dayKey === 'lift:B') {
+        group.insertBefore(
+          el(
+            'div.banner.banner--warn',
+            null,
+            el('span.grow.small', {
+              text: today.raceWeek.recommendSkip
+                ? `The 10K is in about ${today.raceWeek.hoursToLongRun}h. Legs are prescribed light — skipping them is the better call this close. Upper-body work is unchanged.`
+                : 'Race week: leg work is halved and kept easy so nothing lingers into the 10K. Pull-ups and curls are unchanged.',
+            }),
+          ),
+          group.firstChild,
+        );
+      }
+
+      // Running-load rails on the planned distance — single-run spike and
+      // weekly jump (SYNTHESIS §3.1).
       if (card.track === 'run' && card.session.target.km) {
-        const longest = longestRecentRunKm(state.sessions);
-        const spike = checkRunSpike(card.session.target.km, longest);
-        if (!spike.ok) {
-          group.appendChild(el('div.banner.banner--warn', null, el('span.small', { text: spike.message })));
+        for (const w of runLoadWarnings(state.sessions, { km: card.session.target.km, date: today.date }, {
+          today: today.date,
+          priorInjury: state.meta.priorLowerLimbInjury === true,
+        })) {
+          group.appendChild(el('div.banner.banner--warn', null, el('span.small', { text: w.message })));
         }
       }
 
@@ -393,12 +510,16 @@ export default function mountToday(root) {
           el(
             'div.card',
             null,
-            el('div.hero-title', { text: done ? 'Done for today' : 'Nothing scheduled' }),
+            el('div.hero-title', { text: done ? 'Done for today' : today.restByDefault ? 'Rest day — by design' : 'Nothing scheduled' }),
             el('p.small.muted', {
               style: { marginTop: '0.5rem' },
               text: done
                 ? 'Session logged. Recovery is where the adaptation actually happens.'
-                : 'Rest is programmed, not a gap. Train anyway if you want to — it will slot in correctly.',
+                : today.restByDefault
+                  ? (today.role === 'test'
+                      ? 'Test week: the optional run and bonus day are off by default so the RPE-9 triples are honest. Bone needs a rest day too.'
+                      : 'The long run is 8 km or more now, so the optional run is off by default. Take it only if the legs feel fresh.')
+                  : 'Rest is programmed, not a gap. Train anyway if you want to — it will slot in correctly.',
             }),
           ),
           onTap(el('button.btn.btn--block', { type: 'button', text: 'Train something anyway' }), () =>

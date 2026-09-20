@@ -7,8 +7,9 @@ import { MAIN_LIFTS, getExercise, MUSCLE_LABELS } from '../../program/exercises.
 import { CURRENT_PROGRAM } from '../../program/index.js';
 import {
   e1rmSeries, topSetSeries, runSeries, weeklyRunVolume, coreSeries,
-  weeklyVolumeByMuscle, runMilestones,
+  weeklyVolumeByMuscle, runMilestones, coreAdherence, easyRunEffortByWeekday,
 } from '../../core/stats.js';
+import { corePhaseFor } from '../../core/prescribe.js';
 import { formatPace } from '../../core/progression.js';
 import { startOfWeek, trainingDate, formatDate } from '../../core/dates.js';
 import { navigate } from '../../router.js';
@@ -19,17 +20,21 @@ const LIFT_COLOR = {
   'weighted-pullup': 'var(--pullup)',
 };
 
-// RP volume landmarks, for the weekly set readout. MEV = minimum effective,
-// MAV = the productive band. Shown so volume can be sanity-checked at a glance.
+// v3 weekly DIRECT-set targets per muscle (SYNTHESIS §2.1): flat, not ramped.
+// The old RP MEV/MAV landmarks were unmeasured expert opinion and are gone.
+// `min` is the low edge of the band; `max` fills the bar. Legs are maintenance.
 const LANDMARKS = {
-  'side-delts': { mev: 6, mav: 24 },
-  'rear-delts': { mev: 4, mav: 12 },
-  triceps: { mev: 4, mav: 16 },
-  biceps: { mev: 8, mav: 20 },
-  chest: { mev: 6, mav: 20 },
-  back: { mev: 8, mav: 22 },
-  quads: { mev: 6, mav: 18 },
-  hamstrings: { mev: 4, mav: 16 },
+  'side-delts': { min: 8, max: 10 },
+  'rear-delts': { min: 6, max: 8 },
+  triceps: { min: 8, max: 10 },
+  biceps: { min: 8, max: 10 },
+  chest: { min: 3, max: 7 },
+  'front-delts': { min: 3, max: 7 },
+  back: { min: 7, max: 13 },
+  quads: { min: 3, max: 6 },
+  hamstrings: { min: 3, max: 4 },
+  calves: { min: 2, max: 4 },
+  core: { min: 6, max: 12 },
 };
 
 function trendDelta(points) {
@@ -132,8 +137,8 @@ function liftsTab(sessions) {
   if (vol.length) {
     const rows = vol.map((v) => {
       const lm = LANDMARKS[v.muscle];
-      const pct = lm ? Math.min(100, (v.sets / lm.mav) * 100) : Math.min(100, v.sets * 5);
-      const under = lm && v.sets < lm.mev;
+      const pct = lm ? Math.min(100, (v.sets / lm.max) * 100) : Math.min(100, v.sets * 5);
+      const under = lm && v.sets < lm.min;
       return el(
         'div.volbar',
         null,
@@ -147,7 +152,7 @@ function liftsTab(sessions) {
         'div.chart-card',
         null,
         el('div.chart-title', { text: 'Hard sets this week' }),
-        el('p.xs.dim', { style: { margin: '0.25rem 0 0.75rem' }, text: 'Bar is filled against the top of the productive range (RP’s MAV). Amber means below the minimum effective dose.' }),
+        el('p.xs.dim', { style: { margin: '0.25rem 0 0.75rem' }, text: 'Direct sets, filled against the top of this program’s weekly target. Amber means under the band — the priority muscles sit at 8–10 direct sets, held flat all block.' }),
         el('div.stack', { style: { gap: '0.5rem' } }, ...rows),
       ),
     ]);
@@ -285,26 +290,82 @@ function runningTab(sessions) {
     ]);
   }
 
+  // Easy-run effort by weekday: the evidence that decides whether the Tuesday
+  // run (the day after legs) stays on Tuesday (SYNTHESIS §4.3).
+  const byDay = easyRunEffortByWeekday(sessions).filter((r) => r.meanRpe != null || r.talkNegativePct != null);
+  if (byDay.length) {
+    const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+    append(wrap, [
+      el(
+        'div.chart-card',
+        null,
+        el('div.chart-title', { text: 'Easy-run effort by weekday' }),
+        el('p.xs.dim', { style: { margin: '0.25rem 0 0.75rem' }, text: 'CR10 (aim 3–4) and how often the talk test failed. If Tuesday runs sit at 5+ for a block while Thursday runs do not, the easy run moves to Thursday.' }),
+        ...byDay.map((r) =>
+          el(
+            'div.row-between.small',
+            { style: { padding: '0.3rem 0' } },
+            el('span', { text: `${names[r.dow]} · ${r.runs} run${r.runs === 1 ? '' : 's'}` }),
+            el('span.num.dim', {
+              text: `${r.meanRpe != null ? `CR10 ${r.meanRpe}` : '—'}${r.talkNegativePct != null ? ` · talk ✗ ${r.talkNegativePct}%` : ''}`,
+              style: r.meanRpe >= 5 ? { color: 'var(--warn)' } : {},
+            }),
+          ),
+        ),
+      ),
+    ]);
+  }
+
   return wrap;
 }
 
 function coreTab(sessions) {
   const wrap = el('div.stack-lg');
   const cursors = store.cursors();
-  const phase = [...CURRENT_PROGRAM.corePhases].reverse().find((p) => cursors.core.completed >= p.afterSessions) ?? CURRENT_PROGRAM.corePhases[0];
+  const phase = corePhaseFor(CURRENT_PROGRAM, cursors.core.completed);
+  const phases = CURRENT_PROGRAM.core?.phases ?? CURRENT_PROGRAM.corePhases ?? [];
+  const adherence = coreAdherence(sessions, CURRENT_PROGRAM, { since: store.getState().meta.v3StartedAt?.date ?? null });
 
   append(wrap, [
     el(
       'div.card',
       null,
-      el('div.eyebrow', { text: `Phase ${phase.phase} of 3` }),
+      el('div.eyebrow', { text: `Phase ${phase.phase} of ${phases.length}` }),
       el('div.hero-title', { text: phase.name }),
       el('p.small.muted', { style: { marginTop: '0.4rem' }, text: phase.note }),
       el('p.small.dim', { style: { marginTop: '0.5rem' }, text: `${cursors.core.completed} core sessions logged.` }),
     ),
   ]);
 
-  const tracked = [...new Set(sessions.filter((s) => s.kind === 'core').flatMap((s) => (s.entries ?? []).map((e) => e.exerciseId)))];
+  // Adherence is the test of the placement, not of the athlete: the mat
+  // programme failed because it was skipped, and the loaded one lives at the
+  // end of Lower and Push for exactly that reason (SYNTHESIS §5.4).
+  if (adherence && adherence.hosts > 0) {
+    append(wrap, [
+      el(
+        'div.card',
+        { dataset: { coreAdherence: adherence.ok ? 'ok' : 'low' } },
+        el('div.row-between', null,
+          el('div.listitem-title', { text: 'Core done at the end of Lower / Push' }),
+          el(`span.pill.${adherence.ok ? 'pill--good' : 'pill--warn'}`, { text: `${adherence.pct}%` }),
+        ),
+        el('p.small.muted', {
+          style: { marginTop: '0.4rem' },
+          text: `${adherence.done} of ${adherence.hosts} sessions${adherence.standalone ? ` · ${adherence.standalone} standalone` : ''}. ${
+            adherence.ok ? 'Above the 75% line — the placement is working.' : 'Under 75% — the placement is wrong again, not you. Worth changing where core lives.'
+          }`,
+        }),
+      ),
+    ]);
+  }
+
+  const tracked = [
+    ...new Set(
+      sessions
+        .filter((s) => s.status === 'completed')
+        .flatMap((s) => (s.entries ?? []).filter((e) => s.kind === 'core' || e.group === 'core').map((e) => e.exerciseId)),
+    ),
+  ];
   if (!tracked.length) {
     append(wrap, [el('div.empty', null, el('div.empty-mark', { text: '◔' }), el('p', { text: 'No core sessions logged yet.' }))]);
     return wrap;

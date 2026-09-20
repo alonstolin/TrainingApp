@@ -58,22 +58,28 @@ function dayDetailSheet(dayEntry) {
     // For a planned lift day, show the actual movements and rep schemes — this
     // is the "what am I walking into" the calendar exists to answer.
     if (e.projected && e.track === 'lift' && e.key?.startsWith('lift:')) {
-      const resolved = resolveLiftSession(CURRENT_PROGRAM, e.key, e.weekInMeso ?? 1, () => null);
+      const resolved = resolveLiftSession(CURRENT_PROGRAM, e.key, {
+        role: e.role ?? 'probe',
+        weekInMeso: e.weekInMeso ?? 1,
+        historyFor: () => null,
+        coreCompleted: store.cursors().core.completed,
+      });
       card.appendChild(
         el(
           'ul.stack',
           { style: { marginTop: '0.75rem', gap: '0.3rem' } },
           ...resolved.entries.map((x) =>
             el('li.row-between.small', null,
-              el('span.truncate.grow', { text: x.name }),
-              el('span.dim.num', { text: x.label.replace(/ @ RPE.*/, '') }),
+              el('span.truncate.grow', { text: x.name + (x.group === 'core' ? ' · core' : '') }),
+              el('span.dim.num', { text: x.label.replace(/ @ RPE.*| · last set.*/, '') }),
             ),
           ),
         ),
       );
       if (e.weekInMeso) {
+        const role = e.role === 'deload' ? 'deload' : e.role === 'test' ? 'test week' : 'probe week';
         card.appendChild(
-          el('p.xs.dim', { style: { marginTop: '0.6rem' }, text: `Block ${e.mesocycle} · week ${e.weekInMeso} of ${CURRENT_PROGRAM.mesocycleWeeks}` }),
+          el('p.xs.dim', { style: { marginTop: '0.6rem' }, text: `Block ${e.mesocycle} · week ${e.weekInMeso} of ${e.blockLength ?? CURRENT_PROGRAM.mesocycleWeeks} · ${role}` }),
         );
       }
     }

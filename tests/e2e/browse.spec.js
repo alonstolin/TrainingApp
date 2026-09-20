@@ -16,6 +16,15 @@ const boot = async (page) => {
   await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
 };
 
+/**
+ * Days with a weighted pull-up ask for bodyweight before the session opens
+ * (SYNTHESIS §1.5). Accept the sheet when it appears; otherwise carry on.
+ */
+async function acceptBodyweight(page) {
+  const use = page.locator('.sheet button', { hasText: 'Use this weight' });
+  if (await use.isVisible().catch(() => false)) await use.click();
+}
+
 async function seed(page, count) {
   await page.evaluate(async (n) => {
     const store = await import('./src/data/store.js');
@@ -116,6 +125,7 @@ test('a logged set can be corrected mid-session', async ({ page }) => {
   await boot(page);
 
   await page.locator('button.btn--xl').first().click();
+  await acceptBodyweight(page);
   await expect(page.locator('.screen--session')).toBeVisible();
 
   const plus = page.locator('.stepper button', { hasText: '+' }).first();

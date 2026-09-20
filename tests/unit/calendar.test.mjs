@@ -20,9 +20,10 @@ test('the weekly pattern matches the program template, Monday first', () => {
   const wk = weekPattern(program);
   assert.deepEqual(wk.map((d) => d.day), ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']);
   assert.deepEqual(wk[0].slots.map((s) => s.key), ['lift:B']);
-  assert.deepEqual(wk[1].slots.map((s) => s.key), ['run:easy', 'core']);
+  assert.deepEqual(wk[1].slots.map((s) => s.key), ['run:easy']);
   assert.equal(wk[3].isRest, true, 'Thursday is optional-only');
   assert.deepEqual(wk[5].slots.map((s) => s.key), ['run:long', 'core']);
+  assert.equal(wk[5].slots[1].optional, true, 'Saturday core is optional in v3');
 });
 
 test('future days are projected from the cursor, cycling the lift days in order', () => {
@@ -32,7 +33,7 @@ test('future days are projected from the cursor, cycling the lift days in order'
 
   assert.deepEqual(keysOn(days, MON), ['lift:B']);
   assert.deepEqual(keysOn(days, '2026-08-19'), ['lift:A']);
-  assert.deepEqual(keysOn(days, '2026-08-21'), ['lift:C', 'core']);
+  assert.deepEqual(keysOn(days, '2026-08-21'), ['lift:C']);
   assert.deepEqual(keysOn(days, SUN), ['lift:D']);
 });
 
@@ -56,18 +57,25 @@ test('the projection starts from where the cursor actually is, not from day one'
   assert.deepEqual(keysOn(days, MON), ['lift:C']);
 });
 
-test('projected mesocycle week advances every four projected lifts', () => {
+test('the projected mesocycle follows the projected run weeks: deloads land on the running down-weeks', () => {
+  // Fresh start: run week 1 on the first Saturday, the week-4 down-week is
+  // the first lifting deload, and the calendar says so in advance.
   const days = buildCalendar(emptyState({ startDate: MON }), program, {
-    from: MON, to: '2026-10-30', today: MON, includeOptional: false,
+    from: MON, to: '2026-12-30', today: MON, includeOptional: false,
   });
-  const lifts = days.flatMap((d) => d.entries.filter((e) => e.track === 'lift'));
+  const lifts = days.flatMap((d) => d.entries.filter((e) => e.track === 'lift').map((e) => ({ ...e, date: d.date })));
   assert.equal(lifts[0].weekInMeso, 1);
   assert.equal(lifts[3].weekInMeso, 1);
-  assert.equal(lifts[4].weekInMeso, 2);
-  assert.equal(lifts[16].weekInMeso, 5);
-  assert.equal(lifts[16].isDeload, true, 'the deload is visible in advance');
-  assert.equal(lifts[20].weekInMeso, 1);
-  assert.equal(lifts[20].mesocycle, 2);
+  assert.equal(lifts[4].weekInMeso, 2, 'the second calendar week is week 2 — the Saturday long run advanced the run week');
+  const firstDeload = lifts.find((l) => l.isDeload);
+  assert.ok(firstDeload, 'the deload is visible in advance');
+  const weekOf = days.filter((d) => d.date >= firstDeload.date).slice(0, 7);
+  const long = weekOf.flatMap((d) => d.entries).find((e) => e.key === 'run:long');
+  assert.equal(long.isDown, true, 'the lifting deload sits on a running down-week');
+  assert.equal(lifts.find((l) => l.role === 'test').weekInMeso, 3);
+  const block2 = lifts.find((l) => l.mesocycle === 2);
+  assert.equal(block2.weekInMeso, 1);
+  assert.equal(block2.role, 'probe');
 });
 
 test('the run plan advances only on projected LONG runs', () => {
@@ -147,7 +155,7 @@ test("today shows what is done as fact and what remains as forecast", () => {
   const t = day(days, TUE);
   assert.equal(t.entries.filter((e) => e.status === 'completed').length, 1, 'the run is logged');
   const remaining = t.entries.filter((e) => e.projected);
-  assert.deepEqual(remaining.map((e) => e.key), ['core'], 'only core is still outstanding');
+  assert.deepEqual(remaining.map((e) => e.key), [], 'nothing else is owed on Tuesday');
 });
 
 test('a fully completed day projects nothing further', () => {
@@ -163,8 +171,8 @@ test('the 10K goal date is projected and moves out when you fall behind', () => 
   const onTrack = projectGoalDate(emptyState({ startDate: MON }), program, MON);
   assert.ok(onTrack, 'a goal date should be projected');
   assert.equal(onTrack.km, 10);
-  // 14 run weeks, one long run each, one long run a week.
-  assert.ok(onTrack.weeksAway >= 13 && onTrack.weeksAway <= 15, `got ${onTrack.weeksAway} weeks`);
+  // 15 run weeks, one long run each, one long run a week.
+  assert.ok(onTrack.weeksAway >= 14 && onTrack.weeksAway <= 16, `got ${onTrack.weeksAway} weeks`);
 
   const ahead = projectGoalDate(
     st(Array.from({ length: 6 }, () => mkSession({ kind: 'run', variant: 'long', status: 'completed' }))),
@@ -175,7 +183,7 @@ test('the 10K goal date is projected and moves out when you fall behind', () => 
 });
 
 test('the goal date is null once the 10K is banked', () => {
-  const done = Array.from({ length: 14 }, () =>
+  const done = Array.from({ length: 15 }, () =>
     mkSession({ kind: 'run', variant: 'long', status: 'completed' }),
   );
   assert.equal(projectGoalDate(st(done), program, MON), null);
@@ -196,14 +204,31 @@ test('monthGrid pads to a Monday-first grid', () => {
 
 test('slot labels describe runs by their target and core by its phase', () => {
   assert.equal(slotLabel(program, 'run:long', { runWeek: 1 }).target, '25 min');
-  assert.equal(slotLabel(program, 'run:long', { runWeek: 14 }).target, '10 km');
-  assert.equal(slotLabel(program, 'run:long', { runWeek: 14 }).isGoal, true);
+  assert.equal(slotLabel(program, 'run:long', { runWeek: 15 }).target, '10 km');
+  assert.equal(slotLabel(program, 'run:long', { runWeek: 15 }).isGoal, true);
   assert.equal(slotLabel(program, 'run:long', { runWeek: 8 }).isDown, true);
   assert.equal(slotLabel(program, 'core', { coreCompleted: 0 }).phase, 1);
-  assert.equal(slotLabel(program, 'core', { coreCompleted: 30 }).phase, 3);
+  assert.equal(slotLabel(program, 'core', { coreCompleted: 16 }).phase, 3);
   assert.equal(slotLabel(program, 'lift:D', {}).short, 'Delts');
 });
 
 test('an inverted range yields nothing rather than looping', () => {
   assert.deepEqual(buildCalendar(emptyState(), program, { from: SUN, to: MON, today: MON }), []);
+});
+
+test('the bonus day disappears from the projection outside probe weeks, and test-week Thursdays read as rest', () => {
+  const days = buildCalendar(emptyState({ startDate: MON }), program, {
+    from: MON, to: '2026-12-30', today: MON, includeOptional: true,
+  });
+  const thursdays = days.filter((d) => d.dow === 4);
+  const probeThu = thursdays[0];
+  assert.ok(probeThu.entries.some((e) => e.key === 'lift:E'), 'first Thursday offers the bonus');
+  // Find a Thursday inside a test week: the lift before it carries role 'test'.
+  const testThu = thursdays.find((thu) => {
+    const wed = days.find((d) => d.date === thu.date.replace(/\d{2}$/, (x) => String(Number(x) - 1).padStart(2, '0')));
+    return wed?.entries.some((e) => e.role === 'test');
+  });
+  assert.ok(testThu, 'a test-week Thursday exists in the range');
+  assert.ok(!testThu.entries.some((e) => e.key === 'lift:E'), 'no bonus day in the test week');
+  assert.ok(testThu.entries.some((e) => e.restByDefault), 'the optional run reads as rest by default');
 });
