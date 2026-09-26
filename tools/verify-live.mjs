@@ -132,7 +132,12 @@ program.goalKm === 10 && program.days === 5 && program.corePhases === 3
   : bad('program loaded', JSON.stringify(program));
 
 // --- a real logging round-trip against production
-await page.locator('button.btn--xl').first().click();
+// Explicitly a LIFT: the Today hero is a run at weekends and nothing on
+// Thursdays, so clicking it and waiting for "Log set" only worked midweek.
+const other = page.locator('button', { hasText: 'Something else' });
+if (await other.count()) await other.click();
+else await page.locator('button', { hasText: 'Train something anyway' }).click();
+await page.locator('.sheet .listitem', { hasText: 'Upper Push' }).first().click();
 // Pull-up days ask for bodyweight before the session opens.
 const useBw = page.locator('.sheet button', { hasText: 'Use this weight' });
 if (await useBw.isVisible().catch(() => false)) await useBw.click();
