@@ -26,7 +26,9 @@ The repo is public. Training data, bodyweight and GPS tracks never go in it —
    `src/program/`, and gets a dated entry in `DECISIONS.md`.
 
 `node tools/review.mjs coach/data/backups/<file>.json` works on its own too;
-`--since YYYY-MM-DD` narrows the period, `--stdout` prints instead of writing.
+`--since YYYY-MM-DD` narrows the period, `--stdout` prints instead of writing,
+`--help` prints the usage. Records the backup format rejects are named in the
+report and on stderr rather than quietly left out.
 
 ## What the report is
 

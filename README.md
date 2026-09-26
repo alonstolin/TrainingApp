@@ -243,9 +243,11 @@ on top, and stay on the logged run.
 The map is [Leaflet](https://leafletjs.com) 1.9.4, vendored in `vendor/leaflet/`
 and precached with the app — the one exception to "zero runtime dependencies",
 made because pinch-zoom on iOS is not something worth rewriting. Tiles are the
-only network dependency the app has: CARTO's dark basemap (free for
-non-commercial use, attribution shown) with OpenStreetMap as the fallback, both
-key-free so nothing secret lives in this public repo. The service worker caches
+only network dependency the app has, and they come from OpenStreetMap, inverted
+in CSS for the dark theme. (CARTO's dark basemap was the first choice and had to
+go: it now answers unauthenticated requests with an "API KEY REQUIRED" tile.
+OSM's own tiles are the one raster source that genuinely needs no account, which
+is the property that matters in a public repo.) The service worker caches
 every tile you view in its own bucket (600 tiles, oldest out first), so the
 routes you actually run stay viewable offline; a tile never seen is a grey
 square with the route still drawn on it.

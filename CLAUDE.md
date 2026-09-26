@@ -65,9 +65,17 @@ Everything hard lives here — schedule, prescription, progression, stats, calen
 
 IndexedDB, one record per session, all loaded into memory at boot (`src/data/store.js`). Every UI read is a synchronous lookup. Writes are debounced but serialised through a single chain so `await flush()` waits for everything in flight — `pagehide` is the only unload event iOS reliably fires, and it tears the page down immediately after. Backup is JSON export/import; there is no server and no account.
 
+### Layout invariants
+
+Three bugs here were all "the CSS said something that was not true", so the app measures instead of guessing:
+
+- **`[hidden]` needs the `!important` reset in base.css.** It is a UA rule; any author `display` beats it, and three elements in this app are toggled by the attribute AND styled `display: flex`/`grid`. Without the reset they render as empty furniture.
+- **`--bottom-chrome` / `--actionbar-h`** are written by `ui/chrome.js` from the real heights of the tab bar, rest bar and action bar. Anything reserving room at the bottom reads those, never a constant; the rest bar stacks on `--actionbar-h`. `revealBelowChrome()` nudges the set editor back into view when the rest bar appears over it. `tests/e2e/layout.spec.js` asserts the whole editor clears the chrome.
+- **`.stack`/`.stack-lg` use `minmax(0, 1fr)` tracks.** An `auto` grid track is sized to the widest child's min-content, and `.truncate` (nowrap) reports its whole string — one long subtitle once stretched the Today column to 576px on a 390px screen.
+
 ### The coaching loop
 
-`coach/` is the review side of the app: `tools/review.mjs` turns a backup JSON into a Markdown report by running the same `src/core/` modules the app runs and applying the synthesis's rules; `coach/DECISIONS.md` (committed) is the dated log of program decisions; `coach/data/` and `coach/reports/` are gitignored because the repo is public. The `/review` skill (`.claude/skills/review/SKILL.md`) drives it. A program change found in review still goes through the Opus reviewer agent before `src/program/` changes. `tests/unit/review.test.mjs` simulates six weeks of v3 and checks the report end to end.
+`coach/` is the review side of the app: `tools/review.mjs` turns a backup JSON into a Markdown report by running the same `src/core/` modules the app runs and applying the synthesis's rules; `coach/DECISIONS.md` (committed) is the dated log of program decisions; `coach/data/` and `coach/reports/` are gitignored because the repo is public. The `/review` skill (`.claude/skills/review/SKILL.md`) drives it. A program change found in review still goes through the Opus reviewer agent before `src/program/` changes. `tests/unit/review.test.mjs` simulates six weeks of v3 and checks the report end to end. Two rules there are easy to get subtly wrong and have named tests: a probe is judged against the reference it was lifted AGAINST (comparing it to the reference after its own back-offs raised it made every good session look like a 3% shortfall), and a stall is counted in complete blocks (the `stalls` counter resets on the deload after a test week, so "two blocks without an increment" is unreachable through it).
 
 ### Maps and routes
 
@@ -91,4 +99,5 @@ Cache-first, precache-everything, `updateViaCache: 'none'` (GitHub Pages serves 
 - GPS tests stub `navigator.geolocation.watchPosition` via `addInitScript`. Fix timestamps must advance at a plausible pace — `core/geo.js` rejects implausible speeds, so emitting 9m-apart fixes 20ms apart looks like teleporting and every point is (correctly) dropped.
 - `tests/unit/geo-accuracy.test.mjs` simulates runs with **autocorrelated** GPS error and asserts recorded distance against a known truth. White noise would overstate the problem and flatter any filter; a 400m track is included because over-smoothing shows up there as under-reporting.
 - `tests/unit/_fixtures.mjs` has session/set builders and the loaded program (`program` is v3, `v2` the legacy file).
-- e2e specs that start a pull-up day must accept the bodyweight sheet first (`acceptBodyweight` helpers in the specs). Seeding lifts programmatically goes through `store.cursors()` for the role and `resolveSession` with `{ role, coreCompleted, historyFor, bodyweightKg }` — see `deload.spec.js`.
+- **Never assume today's hero button starts a lift** — the Today screen serves the real weekday, so it is a run at weekends and nothing on Thursdays. Use `startLift`/`startVia` from `tests/e2e/_helpers.js`, and `fixDay` when a spec genuinely needs a given weekday.
+- e2e specs that start a pull-up day must accept the bodyweight sheet first (`acceptBodyweight` in `_helpers.js`). Seeding lifts programmatically goes through `store.cursors()` for the role and `resolveSession` with `{ role, coreCompleted, historyFor, bodyweightKg }` — see `deload.spec.js`.

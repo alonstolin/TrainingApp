@@ -16,41 +16,86 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
+import { validateBackup, sessionIntegrity } from '../src/core/schema.js';
+import { deriveCursors, makeHistoryLookup } from '../src/core/schedule.js';
+import {
+  blockReference, e1rm, effectiveLoad, formatPace, runLoadWarnings, loadFromReference,
+} from '../src/core/progression.js';
+import { coreAdherence, easyRunEffortByWeekday, weeklyRunVolume, runSeries } from '../src/core/stats.js';
+import { startOfWeek, addDays, daysBetween, formatDuration, trainingDate } from '../src/core/dates.js';
+import { PROGRAMS, CURRENT_PROGRAM, getExercise, MAIN_LIFTS } from '../src/program/index.js';
+import { setIncrementOverrides } from '../src/program/exercises.js';
+
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const core = (f) => import(path.join(ROOT, 'src', 'core', f));
-const { validateBackup, sessionIntegrity } = await core('schema.js');
-const { deriveCursors, mesoState, makeHistoryLookup } = await core('schedule.js');
-const { blockReference, e1rm, effectiveLoad, paceSecPerKm, formatPace, runLoadWarnings, SPIKE_LIMIT } = await core('progression.js');
-const { coreAdherence, easyRunEffortByWeekday, weeklyRunVolume, runSeries } = await core('stats.js');
-const { startOfWeek, addDays, daysBetween, formatDuration } = await core('dates.js');
-const { PROGRAMS, CURRENT_PROGRAM, getExercise, MAIN_LIFTS } = await import(path.join(ROOT, 'src', 'program', 'index.js'));
 
 // ---------------------------------------------------------------------------
 // Arguments
 // ---------------------------------------------------------------------------
 
-const args = process.argv.slice(2);
-const flag = (name) => {
-  const i = args.indexOf(name);
-  return i >= 0 ? args[i + 1] : null;
-};
-const file = args.find((a) => !a.startsWith('--') && (args.indexOf(a) === 0 || !args[args.indexOf(a) - 1]?.startsWith('--')));
-if (!file) {
-  console.error('usage: node tools/review.mjs <backup.json> [--since YYYY-MM-DD] [--out dir] [--stdout]');
-  process.exit(2);
+const BOOLEAN_FLAGS = new Set(['--stdout', '--help']);
+const USAGE = 'usage: node tools/review.mjs <backup.json> [--since YYYY-MM-DD] [--out dir] [--stdout]';
+
+/** Parse argv into { file, flags }. Boolean flags do not swallow the next token. */
+function parseArgs(argv) {
+  const flags = {};
+  const rest = [];
+  for (let i = 0; i < argv.length; i++) {
+    const a = argv[i];
+    if (!a.startsWith('--')) {
+      rest.push(a);
+      continue;
+    }
+    if (BOOLEAN_FLAGS.has(a)) {
+      flags[a] = true;
+      continue;
+    }
+    const value = argv[i + 1];
+    if (value == null || value.startsWith('--')) die(`${a} needs a value.`);
+    flags[a] = value;
+    i++;
+  }
+  return { file: rest[0], flags };
 }
-const raw = fs.readFileSync(file, 'utf8');
-const v = validateBackup(raw);
+
+function die(message, code = 2) {
+  console.error(message);
+  console.error(USAGE);
+  process.exit(code);
+}
+
+const { file, flags } = parseArgs(process.argv.slice(2));
+if (flags['--help']) {
+  console.log(USAGE);
+  process.exit(0);
+}
+if (!file) die('no backup file given.');
+if (flags['--since'] && !/^\d{4}-\d{2}-\d{2}$/.test(flags['--since'])) die(`--since must be YYYY-MM-DD, got "${flags['--since']}".`);
+
+const v = validateBackup(fs.readFileSync(file, 'utf8'));
 if (!v.ok) {
   console.error('backup did not validate:', v.errors.join('; '));
   process.exit(1);
 }
 const { meta, sessions, routes = [] } = v.data;
+// Sessions validateBackup threw out are NOT silently missing from the review:
+// a report computed on a subset would understate adherence and could invent a
+// gap. They are reported here and again under Data quality.
+const dropped = v.warnings ?? [];
+if (dropped.length) console.error(`${dropped.length} record(s) were dropped by validation — see the Data quality section.`);
+
 const program = PROGRAMS[meta.programVersion] ?? CURRENT_PROGRAM;
-const today = (raw.match(/"exportedAt":\s*"(\d{4}-\d{2}-\d{2})/) ?? [])[1] ?? new Date().toISOString().slice(0, 10);
-const since = flag('--since') ?? meta.v3StartedAt?.date ?? addDays(today, -56);
-const outDir = flag('--out') ?? path.join(ROOT, 'coach', 'reports');
-const toStdout = args.includes('--stdout');
+// Custom increments are configuration for the prescription layer; the app
+// installs them at boot (data/store.js). Without this the reference maths here
+// would move loads in catalogue steps and disagree with what the app prescribed.
+setIncrementOverrides(meta.increments);
+
+// The log is kept in LOCAL training dates (with a 03:00 rollover), so the end
+// of the period has to be one too. Slicing the UTC date out of `exportedAt`
+// put `today` a day behind the log for any export made after local midnight.
+const today = v.data.exportedAt ? trainingDate(new Date(v.data.exportedAt)) : trainingDate();
+const since = flags['--since'] ?? meta.v3StartedAt?.date ?? addDays(today, -56);
+const outDir = flags['--out'] ?? path.join(ROOT, 'coach', 'reports');
+const toStdout = !!flags['--stdout'];
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -73,8 +118,8 @@ const table = (head, rows) => {
   for (const r of rows) lines.push(`| ${r.map((c) => (c == null ? '—' : String(c))).join(' | ')} |`);
   lines.push('');
 };
-const flags = [];
-const flagIt = (kind, text) => flags.push({ kind, text });
+const fired = [];
+const flagIt = (kind, text) => fired.push({ kind, text });
 
 // ---------------------------------------------------------------------------
 // 1. Header
@@ -124,49 +169,112 @@ for (const liftId of MAIN_LIFTS) {
   h(3, `${ex.name}`);
 
   const heavyRows = [...(lookup(liftId, { dayKey: heavyKey, all: true }) ?? [])].reverse(); // oldest first
+  const blockSpec = block ?? { backoff: { pctOfReference: 0.8, repMax: 6 } };
+  const pctOfRef = blockSpec.backoff?.pctOfReference ?? 0.8;
+  /** The reference as it stood BEFORE session `i` — what that session lifted against. */
+  const referenceBefore = (i) => blockReference(heavyRows.slice(0, i), blockSpec, ex);
+
   const rows = [];
-  let raises = 0;
-  let lastRef = null;
   const refTrail = [];
-  for (let i = 0; i < heavyRows.length; i++) {
+  const firstInPeriod = heavyRows.findIndex((r) => r.date >= since);
+  let raises = 0;
+  let peak = firstInPeriod < 0 ? null : referenceBefore(firstInPeriod).e1rm;
+  const openingRef = peak;
+
+  for (let i = Math.max(0, firstInPeriod); i < heavyRows.length && firstInPeriod >= 0; i++) {
     const r = heavyRows[i];
-    if (r.date < since) continue;
-    const ref = blockReference(heavyRows.slice(0, i + 1), block ?? { backoff: { pctOfReference: 0.8, repMax: 6 } }, ex);
+    const before = referenceBefore(i);
+    const after = blockReference(heavyRows.slice(0, i + 1), blockSpec, ex);
     const probe = (r.sets ?? []).find((s) => s.done && (s.type === 'probe' || s.type === 'top'));
     const bos = (r.sets ?? []).filter((s) => s.done && s.type === 'backoff');
     const probeE1 = probe ? e1rm(effectiveLoad(probe, ex, r.bodyweightKg), probe.reps, probe.rpe) : null;
-    if (lastRef != null && ref.e1rm > lastRef + 1e-9 && !r.isDeload) raises++;
-    lastRef = ref.e1rm;
-    refTrail.push({ date: r.date, ref: ref.e1rm, probeE1, role: r.role, isDeload: r.isDeload, stalls: ref.stalls });
+
+    // A raise is the reference reaching a NEW HIGH. Counting every upward step
+    // instead double-counted recovery from the test-week seed, which can move
+    // the reference DOWN on the deload row — so the next session's return to
+    // the old number read as progress that was never made.
+    if (after.e1rm != null) {
+      // The first value seen is the baseline, not an increase.
+      if (peak == null) peak = after.e1rm;
+      else if (after.e1rm > peak + 1e-9) {
+        raises++;
+        peak = after.e1rm;
+      }
+    }
+    refTrail.push({
+      date: r.date,
+      refBefore: before.e1rm,
+      refAfter: after.e1rm,
+      probeE1,
+      role: r.role,
+      isDeload: r.isDeload,
+    });
     rows.push([
       r.date,
       r.role ?? (r.isDeload ? 'deload' : '—'),
       probe ? `${fmt(probe.weightKg, 2)}${ex.loadModel === 'bodyweight_plus' ? '+' : ''} × ${probe.reps}${probe.rpe ? ` @${probe.rpe}` : ''}` : '—',
       probeE1 ? fmt(probeE1) : '—',
       bos.length ? bos.map((s) => `${fmt(s.weightKg, 2)}×${s.reps}${s.rpe ? `@${s.rpe}` : ''}`).join(' · ') : '—',
-      ref.e1rm ? fmt(ref.e1rm) : '—',
-      ref.source ?? '—',
+      after.e1rm ? fmt(after.e1rm) : '—',
+      after.source ?? '—',
     ]);
   }
   p(`Heavy day (${heavyKey ?? '?'}) — probe, back-offs and the block reference after each session:`);
   table(['Date', 'Role', 'Probe', 'Probe e1RM', 'Back-offs', 'Reference', 'Set by'], rows);
 
   if (refTrail.length) {
-    const first = refTrail[0].ref;
     const last = refTrail[refTrail.length - 1];
-    const lastStalls = last.stalls;
-    p(`Reference ${fmt(first)} → **${fmt(last.ref)}** kg${ex.loadModel === 'bodyweight_plus' ? ' (system mass)' : ''} · ${raises} raise${raises === 1 ? '' : 's'} in the period · ${lastStalls} heavy session${lastStalls === 1 ? '' : 's'} since the last raise.`);
-    // Stall protocol (§1.4): one increment per block is success; two blocks without is a stall.
-    const heavyPerBlock = 3;
-    if (lastStalls >= 2 * heavyPerBlock) {
-      flagIt('stall', `${ex.short}: ${lastStalls} heavy sessions without a raise — two blocks. Stall protocol §1.4, in order: check running load and sleep → swap the heavy-day rep scheme → rotate the volume-day variant → reset the reference 5% and rebuild in 1.25 kg steps.`);
-    } else if (lastStalls >= heavyPerBlock) {
-      flagIt('watch', `${ex.short}: a full block without a raise. One more block and the stall protocol starts.`);
+    const onBar = (e1) => (e1 == null ? null : loadFromReference(e1, pctOfRef, ex, meta.bodyweightKg));
+    // With no reference before the period there was nothing to lift against —
+    // the first session in it established one.
+    const from = openingRef ?? refTrail[0].refAfter;
+    const fromTxt = openingRef == null ? `established at ${fmt(from)}` : fmt(from);
+    p(
+      `Reference ${fromTxt} → **${fmt(last.refAfter)}** kg${ex.loadModel === 'bodyweight_plus' ? ' (system mass)' : ''}` +
+        ` · back-off load ${fmt(onBar(from), 2)} → ${fmt(onBar(last.refAfter), 2)} kg` +
+        ` · ${raises} increase${raises === 1 ? '' : 's'} in the period.`,
+    );
+
+    // Stall protocol (§1.4): one increment per BLOCK is success, two blocks
+    // without one is a stall. Counting from blockReference's own `stalls` did
+    // not work — it resets on the deload that follows a test probe whether or
+    // not the reference moved, so a genuine two-block stall was unreachable.
+    // Blocks are counted here from the deload rows, which is what a block is.
+    const blocks = [];
+    let current = [];
+    for (const t of refTrail) {
+      current.push(t);
+      if (t.isDeload) {
+        blocks.push(current);
+        current = [];
+      }
     }
-    // Reactive deload (a): heavy-day e1RM ≥ 3% below the reference two sessions running.
-    const recent = refTrail.filter((t) => !t.isDeload && t.probeE1).slice(-2);
-    if (recent.length === 2 && recent.every((t) => t.probeE1 < t.ref * 0.97)) {
-      flagIt('deload', `${ex.short}: probe e1RM ≥ 3% under the reference in the last two heavy sessions (${recent.map((t) => `${fmt(t.probeE1)} vs ${fmt(t.ref)}`).join(', ')}) — reactive-deload condition (a), §5.3.`);
+    if (current.length) blocks.push(current);
+    // The block that CREATES the reference cannot have stalled — there was
+    // nothing to add an increment to.
+    const gained = (b) => {
+      const open = b[0].refBefore;
+      if (open == null) return true;
+      return (b[b.length - 1].refAfter ?? 0) - open > 1e-9;
+    };
+    let barren = 0;
+    for (let i = blocks.length - 1; i >= 0 && !gained(blocks[i]); i--) barren++;
+    const sessionsSince = refTrail.length - 1 - refTrail.map((t) => t.refAfter).lastIndexOf(peak);
+
+    if (barren >= 2) {
+      flagIt('stall', `${ex.short}: ${barren} complete blocks without an increment. Stall protocol §1.4, in order: check running load and sleep → swap the heavy-day rep scheme → rotate the volume-day variant → reset the reference 5% and rebuild in ${fmt(ex.afterMisses?.increment ?? ex.increment, 2)} kg steps.`);
+    } else if (barren === 1 && blocks.length > 1) {
+      flagIt('watch', `${ex.short}: one full block without an increment (${sessionsSince} heavy sessions). One more and the stall protocol starts.`);
+    }
+
+    // Reactive deload (a), §5.3: the probe coming in ≥ 3% under the reference
+    // it was lifted AGAINST, twice running. Comparing against the reference
+    // after the session was folded in made every successful back-off session
+    // look like a 3% shortfall — two good sessions in a row recommended a
+    // deload.
+    const recent = refTrail.filter((t) => !t.isDeload && t.probeE1 && t.refBefore).slice(-2);
+    if (recent.length === 2 && recent.every((t) => t.probeE1 < t.refBefore * 0.97)) {
+      flagIt('deload', `${ex.short}: probe e1RM ≥ 3% under the reference it was lifted against, twice running (${recent.map((t) => `${fmt(t.probeE1)} vs ${fmt(t.refBefore)}`).join(', ')}) — reactive-deload condition (a), §5.3.`);
     }
   }
 
@@ -190,10 +298,11 @@ for (const liftId of MAIN_LIFTS) {
 // ---------------------------------------------------------------------------
 
 h(2, 'Accessories and legs');
-p('Top load per session on each exercise (per gym / station for stack work). "Stuck" means the top load has not moved in three or more sessions with the rep range filled — a double-progression stall.');
+p('Top load per session on each exercise (per gym / station for stack work). "Stuck" means the top load has not moved AND the reps are not climbing — adding reps at the same load is double progression working, not a stall.');
 const byExercise = new Map();
 for (const s of period) {
   if (s.kind !== 'lift') continue;
+  const snap = s.prescriptionSnapshot?.entries ?? [];
   for (const e of s.entries ?? []) {
     if (MAIN_LIFTS.includes(e.exerciseId)) continue;
     const done = (e.sets ?? []).filter((x) => x.done && x.reps);
@@ -203,7 +312,16 @@ for (const s of period) {
     if (!byExercise.has(scope)) byExercise.set(scope, { ex, gymId: ex.gymSpecific ? s.gymId : null, station: e.station ?? null, sessions: [] });
     const top = Math.max(...done.map((x) => x.weightKg ?? 0));
     const atTop = done.filter((x) => (x.weightKg ?? 0) === top);
-    byExercise.get(scope).sessions.push({ date: s.date, top, reps: atTop.map((x) => x.reps), rpe: Math.max(0, ...atTop.map((x) => x.rpe ?? 0)), group: e.group, day: s.dayKey });
+    // The rep ceiling the session was actually prescribed, so "range filled"
+    // means what the program meant by it rather than a guess.
+    const repMax = snap.find((x) => x.exerciseId === e.exerciseId)?.plannedSets?.[0]?.targetRepMax ?? null;
+    byExercise.get(scope).sessions.push({
+      date: s.date, top, repMax,
+      reps: atTop.map((x) => x.reps),
+      worstReps: Math.min(...atTop.map((x) => x.reps)),
+      rpe: Math.max(0, ...atTop.map((x) => x.rpe ?? 0)),
+      group: e.group, day: s.dayKey,
+    });
   }
 }
 const accRows = [];
@@ -211,14 +329,37 @@ for (const [, v] of [...byExercise.entries()].sort((a, b) => a[1].ex.name.locale
   const ss = v.sessions.sort((a, b) => (a.date < b.date ? -1 : 1));
   const last = ss[ss.length - 1];
   const loaded = v.ex.metric === 'weight_reps';
-  let stuck = 0;
-  for (let i = ss.length - 1; i >= 0 && ss[i].top === last.top; i--) stuck++;
-  // Bodyweight rep work progresses by reps and lever, not load — no stall verdict.
+
+  // Sessions at the current top load, most recent first.
+  let atLoad = 0;
+  for (let i = ss.length - 1; i >= 0 && ss[i].top === last.top; i--) atLoad++;
+  const run = ss.slice(ss.length - atLoad);
+  // Genuinely stalled only if the reps are not climbing across that run, which
+  // is the other half of double progression. If the range is filled and it
+  // still has not moved, that is a stall with a name.
+  const repsClimbing = run.length > 1 && last.worstReps > run[0].worstReps;
+  const rangeFilled = last.repMax != null && last.worstReps >= last.repMax;
+  const stuck = loaded && atLoad >= 3 && !repsClimbing;
+
   const status = !loaded
     ? `${ss[0].reps.join('/')} → ${last.reps.join('/')} reps`
-    : ss.length === 1 ? 'first session' : stuck >= 3 ? `**stuck ${stuck} sessions**` : ss[0].top < last.top ? `+${fmt(last.top - ss[0].top, 2)} kg` : 'holding';
+    : ss.length === 1
+      ? 'first session'
+      : stuck
+        ? `**stuck ${atLoad} sessions**`
+        : repsClimbing
+          ? `+${last.worstReps - run[0].worstReps} reps @ ${fmt(last.top, 2)} kg`
+          : ss[0].top < last.top
+            ? `+${fmt(last.top - ss[0].top, 2)} kg`
+            : 'holding';
   const where = v.gymId ? ` @ ${gymName(v.gymId)}${v.station ? ` / ${v.station}` : ''}` : '';
-  if (loaded && stuck >= 3) flagIt('accessory', `${v.ex.short}${where}: top load ${fmt(last.top, 2)} kg for ${stuck} sessions.`);
+  if (stuck) {
+    flagIt(
+      'accessory',
+      `${v.ex.short}${where}: ${fmt(last.top, 2)} kg × ${last.reps.join('/')} for ${atLoad} sessions with no added reps` +
+        (rangeFilled ? ' and the rep range already filled — the load should have gone up.' : '.'),
+    );
+  }
   accRows.push([
     v.ex.short + (last.group === 'core' ? ' (core)' : ''),
     v.gymId ? `${gymName(v.gymId)}${v.station ? ` / ${v.station}` : ''}` : v.ex.gymSpecific ? 'no gym set' : '—',
@@ -236,13 +377,21 @@ table(['Exercise', 'Gym / station', 'Sessions', 'Last', 'Trend'], accRows);
 h(2, 'Running');
 const runs = runSeries(sessions).filter((r) => r.date >= since);
 const runRows = [];
+const weeklyFlagged = new Set();
 for (const r of runs) {
   const s = sessions.find((x) => x.id === r.sessionId);
   const wk = s?.programRef?.runWeek;
-  const plan = program.runPlan.find((w) => w.week === wk) ?? program.runMaintenance;
-  const target = plan?.[r.variant];
+  // The plan the session ACTUALLY ran under: a v2 run must not be judged
+  // against v3's ladder, and a run with no recorded week has no target at all
+  // rather than being shown the post-10K maintenance line.
+  const ranUnder = PROGRAMS[s?.programRef?.version] ?? program;
+  const target = wk == null ? null : (ranUnder.runPlan.find((w) => w.week === wk) ?? ranUnder.runMaintenance)?.[r.variant];
   const targetStr = !target ? '—' : target.kind === 'time' ? `${target.minutes} min` : `${target.km} km`;
-  const warn = runLoadWarnings(sessions, { km: r.km, date: r.date, sessionId: r.sessionId }, { today: r.date, priorInjury: meta.priorLowerLimbInjury === true });
+
+  // Judged against what was known AT THE TIME: passing the whole log let a
+  // Tuesday run be blamed for the Saturday long run that had not happened yet.
+  const asOf = sessions.filter((x) => x.date <= r.date);
+  const warn = runLoadWarnings(asOf, { km: r.km, date: r.date, sessionId: r.sessionId }, { today: r.date, priorInjury: meta.priorLowerLimbInjury === true });
   runRows.push([
     r.date,
     r.variant,
@@ -255,7 +404,16 @@ for (const r of runs) {
     s?.run?.talkTest === 'yes' ? '✓' : s?.run?.talkTest === 'no' ? '✗' : '—',
     warn.map((w) => w.kind).join(', ') || '',
   ]);
-  if (warn.length) flagIt('run-load', `${r.date} ${r.variant} ${fmt(r.km, 2)} km: ${warn.map((w) => w.message).join(' ')}`);
+  for (const w of warn) {
+    // One weekly-total rail per week, not once per run in it — the same event
+    // was being reported two or three times over.
+    if (w.kind === 'weekly') {
+      const wkKey = startOfWeek(r.date);
+      if (weeklyFlagged.has(wkKey)) continue;
+      weeklyFlagged.add(wkKey);
+    }
+    flagIt('run-load', `${r.date} ${r.variant} ${fmt(r.km, 2)} km: ${w.message}`);
+  }
   if (r.variant === 'easy' && s?.run?.effort >= 5) flagIt('intensity', `${r.date} easy run at CR10 ${s.run.effort} — an intensity error (§3.3).`);
 }
 table(['Date', 'Kind', 'Run wk', 'Target', 'Distance', 'Time', 'Pace', 'CR10', 'Talk', 'Rails'], runRows);
@@ -282,12 +440,23 @@ const byDay = easyRunEffortByWeekday(sessions, { since });
 const names = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 if (byDay.length) {
   table(['Easy runs by weekday', 'Runs', 'Mean CR10', 'Talk test failed'], byDay.map((r) => [names[r.dow], r.runs, r.meanRpe ?? '—', r.talkNegativePct != null ? `${r.talkNegativePct}%` : '—']));
+  // §4.3: "consistently RPE ≥ 5 OR Talk-Test-negative" on Tuesday while
+  // Thursday is not. Only the RPE half was implemented, so a block of runs
+  // that failed the talk test at CR10 4 — exactly the case the talk test is
+  // there to catch — answered "keep".
   const tue = byDay.find((r) => r.dow === 2);
   const thu = byDay.find((r) => r.dow === 4);
-  if (tue?.runs >= 3 && tue.meanRpe >= 5 && (!thu || thu.meanRpe == null || thu.meanRpe < 5)) {
-    flagIt('template', `Tuesday easy runs average CR10 ${tue.meanRpe} over ${tue.runs} runs${thu ? ` while Thursday averages ${thu.meanRpe}` : ''}: §4.3 says move the easy run to Thursday and make Tuesday the optional slot.`);
+  const laboured = (d) => !!d && ((d.meanRpe != null && d.meanRpe >= 5) || (d.talkNegativePct != null && d.talkNegativePct >= 50));
+  if (tue?.runs >= 3 && laboured(tue) && !laboured(thu)) {
+    const why = [
+      tue.meanRpe >= 5 ? `CR10 ${tue.meanRpe}` : null,
+      tue.talkNegativePct >= 50 ? `talk test failed on ${tue.talkNegativePct}%` : null,
+    ].filter(Boolean).join(' and ');
+    flagIt('template', `Tuesday easy runs (the day after legs): ${why} over ${tue.runs} runs${thu?.runs ? ` while Thursday sits at CR10 ${thu.meanRpe ?? '—'}/${thu.talkNegativePct ?? 0}%` : ' and Thursday has no runs to compare'}: §4.3 says move the easy run to Thursday and make Tuesday the optional slot.`);
   } else if (tue?.runs >= 3) {
-    p(`Tuesday runs (day after legs) average CR10 ${tue.meanRpe ?? '—'} — the template question stays answered "keep".`);
+    p(`Tuesday runs (day after legs): CR10 ${tue.meanRpe ?? '—'}, talk test failed on ${tue.talkNegativePct ?? 0}% — the template question stays answered "keep".`);
+  } else if (tue) {
+    p(`Only ${tue.runs} Tuesday run${tue.runs === 1 ? '' : 's'} in the period — not enough to answer the template question yet (§4.3 wants a block).`);
   }
 }
 
@@ -325,6 +494,11 @@ if (lastWeekRough >= 3) flagIt('deload', `${lastWeekRough} sessions rated Rough/
 
 h(2, 'Data quality');
 const dq = [];
+// Records validateBackup refused. Silently reviewing the survivors would
+// understate adherence and could invent a running gap.
+if (dropped.length) {
+  dq.push(`**${dropped.length} record(s) in the backup failed validation and are NOT in this report**: ${dropped.slice(0, 5).join('; ')}${dropped.length > 5 ? ` (+${dropped.length - 5} more)` : ''}.`);
+}
 const noRpe = period.filter((s) => s.kind === 'lift').flatMap((s) => (s.entries ?? []).flatMap((e) => (e.sets ?? []).filter((x) => x.done && x.reps && x.weightKg != null && x.rpe == null && getExercise(e.exerciseId).metric === 'weight_reps'))).length;
 if (noRpe) dq.push(`${noRpe} loaded sets logged without an RPE — the reference and every progression rule read RPE.`);
 const noEffort = period.filter((s) => s.kind === 'run' && s.run && (s.run.effort == null || s.run.talkTest == null)).length;
@@ -346,8 +520,8 @@ lines.push('');
 
 h(2, 'Rules that fired');
 p('Generated from the program\'s own rules. They are inputs to the review, not conclusions — the reader decides what to change, and any program change goes through the reviewer.');
-if (!flags.length) lines.push('- None. Carry on.');
-for (const f of flags) lines.push(`- **${f.kind}** — ${f.text}`);
+if (!fired.length) lines.push('- None. Carry on.');
+for (const f of fired) lines.push(`- **${f.kind}** — ${f.text}`);
 lines.push('');
 
 // ---------------------------------------------------------------------------
@@ -361,5 +535,5 @@ if (toStdout) {
   fs.mkdirSync(outDir, { recursive: true });
   const out = path.join(outDir, `${today}.md`);
   fs.writeFileSync(out, md);
-  console.log(`wrote ${path.relative(ROOT, out)} · ${flags.length} rule${flags.length === 1 ? '' : 's'} fired`);
+  console.log(`wrote ${path.relative(ROOT, out)} · ${fired.length} rule${fired.length === 1 ? '' : 's'} fired`);
 }

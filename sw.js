@@ -13,7 +13,7 @@
  */
 
 // <<<GENERATED-VERSION-START>>>
-const VERSION = '2026.09.26-48e93159';
+const VERSION = '2026.09.26-89f29506';
 // <<<GENERATED-VERSION-END>>>
 
 const CACHE = `training-${VERSION}`;
