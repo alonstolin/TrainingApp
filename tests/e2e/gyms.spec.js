@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { fixDay, startLift } from './_helpers.js';
 
 /**
  * Two gyms, one app: cable and machine loads are kept per gym and per station,
@@ -6,7 +7,13 @@ import { test, expect } from '@playwright/test';
  * that gym — and none of it leaks into the other gym.
  */
 
+/**
+ * The gym picker lives on the Today hero, which only carries one on a LIFT
+ * day — so these specs pin the clock to a Monday (Lower) rather than passing
+ * on weekdays and failing at weekends.
+ */
 const boot = async (page) => {
+  await fixDay(page);
   await page.goto('./');
   await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
 };
@@ -20,13 +27,7 @@ const addGyms = (page) =>
     return { a: a.id, b: b.id };
   });
 
-const startPush = async (page) => {
-  const other = page.locator('button', { hasText: 'Something else' });
-  if (await other.count()) await other.click();
-  else await page.locator('button', { hasText: 'Train something anyway' }).click();
-  await page.locator('.sheet .listitem', { hasText: 'Upper Push' }).first().click();
-  await expect(page.locator('.screen--session')).toBeVisible();
-};
+const startPush = (page) => startLift(page, 'Upper Push');
 
 test('the Today card asks which gym once there are two, and the session records it', async ({ page }) => {
   await boot(page);

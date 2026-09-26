@@ -256,7 +256,9 @@
   background: var(--surface-3);
   border-top: 1px solid var(--line-strong);
 }
-.rest-bar--session { bottom: calc(var(--tap) + var(--sp-3) * 2 + var(--safe-bottom)); }
+/* Stacked directly on the action bar, whose measured height includes its own
+   safe-area padding. The old constant put it 8px inside the action bar. */
+.rest-bar--session { bottom: var(--actionbar-h, 88px); }
 .rest-bar--done { background: var(--good); color: #04150e; animation: restflash 0.6s ease 3; }
 @keyframes restflash { 50% { filter: brightness(1.45); } }
 .rest-time { font-size: var(--fs-lg); font-weight: 700; font-variant-numeric: tabular-nums; min-width: 62px; }
@@ -619,12 +621,25 @@
 /* The planner is a map with a readout on top and tools underneath; the map
    takes whatever height the viewport leaves. Session maps are fixed-height
    cards. Leaflet's own CSS is loaded with the library. */
-.screen--map { display: flex; flex-direction: column; min-height: 100dvh; padding-bottom: calc(var(--sp-4) + var(--safe-bottom)); }
+/* The planner fills exactly the space above the chrome and never scrolls: the
+   map takes whatever the controls leave. Asking for a full 100dvh (with #app
+   already reserving the tab bar) pushed Save and the help text underneath it,
+   and a tall `min-height` on the map meant the column could not shrink to fit
+   a 390px-wide phone. */
+.screen--map {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - var(--bottom-chrome, 58px));
+  padding-bottom: var(--sp-4);
+  overflow: hidden;
+}
 .page-head--tight { margin-bottom: var(--sp-3); }
 .mapbox {
   position: relative;
   width: 100%;
-  min-height: 42dvh;
+  /* A floor small enough that the column can always fit; the map is the
+     flexible element, so it grows into whatever the controls do not use. */
+  min-height: 180px;
   flex: 1 1 auto;
   border-radius: var(--r-md);
   overflow: hidden;
@@ -648,6 +663,12 @@
   background: var(--bg); border: 3px solid #8ab4ff; box-sizing: border-box;
 }
 .wp-dot--start { background: #8ab4ff; }
+
+/* OSM ships light tiles and this app is dark, so the tile layer is inverted.
+   Hue-rotating back by 180° keeps water blue and parks green rather than
+   leaving the whole map in negative colour. Only the tiles are touched — the
+   route, track and position layers draw on top, unfiltered. */
+.map-tiles { filter: invert(1) hue-rotate(180deg) brightness(0.92) contrast(0.9) saturate(0.75); }
 
 /* Leaflet chrome on a dark app. */
 .leaflet-container { background: #1a1a1a; font-family: inherit; }

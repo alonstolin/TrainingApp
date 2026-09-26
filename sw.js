@@ -13,7 +13,7 @@
  */
 
 // <<<GENERATED-VERSION-START>>>
-const VERSION = '2026.09.20-40bffce0';
+const VERSION = '2026.09.26-48e93159';
 // <<<GENERATED-VERSION-END>>>
 
 const CACHE = `training-${VERSION}`;
@@ -23,7 +23,7 @@ const CACHE = `training-${VERSION}`;
 // survives app updates, trimmed FIFO so a summer of routes cannot fill the
 // phone. Everything else cross-origin is left to the browser.
 const TILE_CACHE = 'training-tiles-v1';
-const TILE_HOSTS = ['basemaps.cartocdn.com', 'tile.openstreetmap.org'];
+const TILE_HOSTS = ['tile.openstreetmap.org'];
 const TILE_LIMIT = 600;
 const isTileHost = (host) => TILE_HOSTS.some((h) => host === h || host.endsWith('.' + h));
 
@@ -77,6 +77,7 @@ const PRECACHE = [
   './src/program/program.v3.js',
   './src/router.js',
   './src/ui/chart.js',
+  './src/ui/chrome.js',
   './src/ui/dom.js',
   './src/ui/map.js',
   './src/ui/runtracker.js',

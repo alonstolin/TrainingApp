@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { startLift } from './_helpers.js';
 
 /** Browsing and editing past work — the read/repair paths, not the logging path. */
 
@@ -124,9 +125,7 @@ test('a past session can be deleted and disappears from history', async ({ page 
 test('a logged set can be corrected mid-session', async ({ page }) => {
   await boot(page);
 
-  await page.locator('button.btn--xl').first().click();
-  await acceptBodyweight(page);
-  await expect(page.locator('.screen--session')).toBeVisible();
+  await startLift(page);
 
   const plus = page.locator('.stepper button', { hasText: '+' }).first();
   for (let i = 0; i < 10; i++) await plus.click();

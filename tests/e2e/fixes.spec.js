@@ -1,16 +1,13 @@
 import { test, expect } from '@playwright/test';
+import { startLift } from './_helpers.js';
 
 const boot = async (page) => {
   await page.goto('./');
   await expect(page.locator('.page-title')).toBeVisible({ timeout: 10_000 });
 };
 
-const startFirstSession = async (page) => {
-  await page.locator('button.btn--xl').first().click();
-  const use = page.locator('.sheet button', { hasText: 'Use this weight' });
-  if (await use.isVisible().catch(() => false)) await use.click();
-  await expect(page.locator('.screen--session')).toBeVisible();
-};
+/** A lift session on any weekday — the Today hero is a run at weekends. */
+const startFirstSession = (page) => startLift(page);
 
 // ---------------------------------------------------------------------------
 // Decimal weights

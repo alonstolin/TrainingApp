@@ -180,19 +180,19 @@ export function mountRoutePlanner(root, params) {
     paint();
     mapApi?.fit(waypoints);
   });
-  const locateBtn = onTap(el('button.btn.btn--sm', { type: 'button', text: waypoints.length ? 'Centre on me' : 'Start from my location', dataset: { locate: '' } }), async () => {
+  const locateBtn = onTap(el('button.btn.btn--sm', { type: 'button', text: waypoints.length ? 'Centre' : 'Start here', dataset: { locate: '' } }), async () => {
     locateBtn.textContent = 'Locating…';
     const pos = await currentPosition();
     if (destroyed) return;
     if (!pos) {
       toast('Could not get a location — tap the map to start instead.');
-      locateBtn.textContent = 'Start from my location';
+      locateBtn.textContent = 'Start here';
       return;
     }
     if (waypoints.length === 0) addPoint({ lat: pos.lat, lon: pos.lon });
     mapApi?.setPosition(pos);
     mapApi?.setView(pos, 16);
-    locateBtn.textContent = 'Centre on me';
+    locateBtn.textContent = 'Centre';
   });
   const saveBtn = onTap(el('button.btn.btn--primary.btn--block', { type: 'button', text: existing ? 'Save changes' : 'Save route', dataset: { save: '' } }), () =>
     textSheet({
@@ -245,7 +245,7 @@ export function mountRoutePlanner(root, params) {
     ),
     mapBox,
     el('div.map-tools', null, locateBtn, undoBtn, closeBtn, backBtn),
-    el('div.map-actions', null, saveBtn, el('p.xs.dim', { text: 'Straight lines between corners — tap where the streets turn. Tap a corner to remove it, drag one to move it.' })),
+    el('div.map-actions', null, saveBtn, el('p.xs.dim', { text: 'Straight lines between corners. Tap a corner to remove it, drag to move it.' })),
   ]);
   paint();
 

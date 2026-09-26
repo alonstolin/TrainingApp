@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { startLift } from './_helpers.js';
 
 /** Fail loudly on any console error or uncaught exception. */
 function watchErrors(page) {
@@ -52,13 +53,9 @@ test('logs a full lift session end to end and it survives a reload', async ({ pa
   const errors = watchErrors(page);
   await boot(page);
 
-  // Monday is Lower; whatever today is, start the primary or pick a lift.
-  const start = page.locator('button.btn--xl').first();
-  await expect(start).toBeVisible();
-  await start.click();
-  await acceptBodyweight(page);
-
-  await expect(page.locator('.screen--session')).toBeVisible();
+  // Explicitly a lift: the Today hero is a RUN on Saturdays and Tuesdays, and
+  // nothing at all on Thursdays.
+  await startLift(page);
 
   // The prescription and the "last time" row must both be present.
   await expect(page.locator('.lasttime')).toBeVisible();
@@ -169,8 +166,7 @@ test('export produces a valid backup that round-trips through import', async ({ 
   await boot(page);
 
   // Log something so there is data worth backing up.
-  await page.locator('button.btn--xl').first().click();
-  await acceptBodyweight(page);
+  await startLift(page);
   const plus = page.locator('.stepper button', { hasText: '+' }).first();
   for (let i = 0; i < 8; i++) await plus.click();
   await page.locator('button', { hasText: /^Log set$/ }).click();

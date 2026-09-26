@@ -3,6 +3,7 @@
 import * as store from './data/store.js';
 import { start, register, navigate } from './router.js';
 import { attachTimerLifecycle } from './ui/timer.js';
+import { trackBottomChrome } from './ui/chrome.js';
 import { el, onTap, clear } from './ui/dom.js';
 import { APP_VERSION } from './version.js';
 import { updateDecision } from './core/updates.js';
@@ -152,6 +153,9 @@ async function boot() {
   document.getElementById('tabbar').hidden = false;
   start(root);
   attachTimerLifecycle();
+  // Measures the fixed bars at the bottom so screens can reserve exactly the
+  // room they cover — see ui/chrome.js.
+  trackBottomChrome();
 
   // Persist writes before the app is suspended or closed. pagehide is the only
   // event iOS reliably fires; beforeunload is not dependable there.

@@ -15,6 +15,7 @@
 import { el, onTap, append, clear, fmtWeight, fmtSets, scrollTop } from '../dom.js';
 import { stepper, rpeRow, repRow, textSheet } from '../stepper.js';
 import { startRest, stopRest, renderRest, holdTimer, keepAwake, unlockAudio } from '../timer.js';
+import { syncBottomChrome, revealBelowChrome } from '../chrome.js';
 import { runTracker, trackMapCard, geoSupported } from '../runtracker.js';
 import { downsample } from '../../core/geo.js';
 import { openSheet, confirmSheet } from '../sheet.js';
@@ -603,7 +604,7 @@ function mountLift(screen, session, ctx) {
       });
 
       body.appendChild(
-        el('div.stack', null, el('div.eyebrow', { text: `Set ${entry.sets.indexOf(current) + 1}` }), editor.node),
+        el('div.stack', { dataset: { editor: '' } }, el('div.eyebrow', { text: `Set ${entry.sets.indexOf(current) + 1}` }), editor.node),
       );
 
       const logLabel = ex.metric === 'time' || ex.metric === 'weight_time' ? 'Log hold' : 'Log set';
@@ -643,6 +644,12 @@ function mountLift(screen, session, ctx) {
               });
               render();
               renderRest();
+              // The rest bar has just appeared over the bottom of the screen;
+              // bring the next set's controls back above it.
+              requestAnimationFrame(() => {
+                syncBottomChrome();
+                revealBelowChrome(screen.querySelector('[data-editor]'));
+              });
             },
           ),
         ),

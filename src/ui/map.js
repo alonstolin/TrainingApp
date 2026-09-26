@@ -14,14 +14,26 @@
 const LEAFLET_JS = './vendor/leaflet/leaflet.js';
 const LEAFLET_CSS = './vendor/leaflet/leaflet.css';
 
+/**
+ * OpenStreetMap's own tiles, and only those: they are the one raster source
+ * that genuinely needs no account. CARTO's dark basemap was the first choice
+ * and had to go — it now answers unauthenticated requests with an "API KEY
+ * REQUIRED" tile, which is what the map turned into.
+ *
+ * OSM's tiles are light, and this app is dark, so they are inverted in CSS
+ * (`.map-tiles` in components.css). Inverting a map is a well-worn trick and
+ * costs nothing; it keeps the source key-free, which is the property that
+ * matters in a public repo.
+ */
 const TILES = [
   {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    opts: { subdomains: 'abcd', maxZoom: 19, crossOrigin: true, attribution: '© OpenStreetMap contributors © CARTO' },
-  },
-  {
     url: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-    opts: { maxZoom: 19, crossOrigin: true, attribution: '© OpenStreetMap contributors' },
+    opts: {
+      maxZoom: 19,
+      crossOrigin: true,
+      className: 'map-tiles',
+      attribution: '© OpenStreetMap contributors',
+    },
   },
 ];
 

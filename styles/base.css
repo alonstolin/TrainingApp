@@ -2,6 +2,13 @@
 
 *, *::before, *::after { box-sizing: border-box; }
 
+/* `hidden` is a UA-stylesheet `display: none`, so ANY author rule that sets
+   display beats it. Three elements in this app are toggled with the attribute
+   and styled with `display: flex`/`grid` — the update pill, the rest bar and
+   the tab bar — so all three rendered as empty furniture on every screen: a
+   blue pill under the status bar and a blank strip above the tab bar. */
+[hidden] { display: none !important; }
+
 html {
   /* Stops Safari inflating text in landscape. */
   -webkit-text-size-adjust: 100%;
@@ -62,9 +69,25 @@ input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 
 
 /* ---- Shell ------------------------------------------------------------- */
 
+/* The status bar is translucent (viewport-fit=cover), so scrolled content runs
+   under the clock and the Dynamic Island and collides with them. A scrim in the
+   inset keeps that strip painted: content scrolls away under a solid edge
+   instead of fighting the system UI. Above the fixed bars, below sheets. */
+body::before {
+  content: '';
+  position: fixed;
+  inset: 0 0 auto 0;
+  height: var(--safe-top);
+  background: var(--bg);
+  z-index: 40;
+  pointer-events: none;
+}
+
 #app {
   min-height: 100dvh;
-  padding-bottom: calc(var(--tabbar-h) + var(--safe-bottom));
+  /* --bottom-chrome is measured in ui/chrome.js: tab bar + rest bar + action
+     bar, whichever are on screen. The fallback is the tab bar alone. */
+  padding-bottom: var(--bottom-chrome, calc(var(--tabbar-h) + var(--safe-bottom)));
 }
 
 .screen {
@@ -74,8 +97,10 @@ input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 
   margin: 0 auto;
 }
 
-/* Sessions get a fixed action bar, so they need extra bottom clearance. */
-.screen--session { padding-bottom: calc(var(--tap) + var(--sp-6) * 2 + var(--safe-bottom)); }
+/* Sessions get a fixed action bar, and a rest timer stacked on top of it. Both
+   are measured (ui/chrome.js) rather than guessed — the guess was 20px short,
+   which put the last row of the set editor permanently out of reach. */
+.screen--session { padding-bottom: calc(var(--bottom-chrome, 138px) + var(--sp-5)); }
 
 .boot {
   display: grid;
@@ -99,8 +124,14 @@ input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 
   font-weight: 600;
 }
 
-.stack { display: grid; gap: var(--sp-3); }
-.stack-lg { display: grid; gap: var(--sp-5); }
+/* `minmax(0, 1fr)`, not the default `auto` track, and the 0 is load-bearing:
+   an auto track is sized to the widest child's MIN-CONTENT, and a child with
+   `white-space: nowrap` (every `.truncate`) reports its whole string as
+   min-content. One long untruncatable subtitle in an Optional card was
+   therefore stretching the Today column to 576px on a 390px screen and taking
+   every sibling — banners, hero, buttons — off the right edge with it. */
+.stack { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-3); }
+.stack-lg { display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--sp-5); }
 .row { display: flex; align-items: center; gap: var(--sp-3); }
 .row-between { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); }
 .grow { flex: 1; min-width: 0; }
@@ -146,7 +177,7 @@ input:focus, textarea:focus { outline: 2px solid var(--accent); outline-offset: 
    and give the action bar the whole bottom edge. */
 body[data-session='active'] .tabbar { display: none; }
 body[data-session='active'] #app { padding-bottom: 0; }
-body[data-session='active'] .toast-host { bottom: calc(var(--tap) + 2rem + var(--safe-bottom)); }
+body[data-session='active'] .toast-host { bottom: calc(var(--bottom-chrome, 138px) + var(--sp-3)); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
