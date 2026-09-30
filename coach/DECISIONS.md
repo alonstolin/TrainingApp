@@ -4,6 +4,42 @@ Dated. Newest first. Each entry says what changed, what data or evidence it
 rested on, and where the detail lives. This is the memory of the program that
 survives any chat.
 
+## 2026-09-30 — The block reference is monotone (R1)
+
+**What:** a test-week probe now seeds the next block's reference **only if it
+exceeds the current one**. Otherwise the reference, its source, its date and the
+stall counter are all left untouched and the seed is discarded. Three lines in
+`blockReference()`, plus the direction written into SYNTHESIS §1.1, which had
+been silent on it.
+
+**Basis:** `research/REVIEW-reference-seeding.md` (program-reviewer, Opus), rated
+MAJOR. Verified here by running it:
+
+- The probe is prefilled at `round(reference / 1.1333)`, and that rounding goes
+  down about half the time — so a test performed at **exactly** the prescribed
+  load, reps and RPE seeded a lower reference (ref 100 → prefills 87.5 → seeds
+  99.17). Being penalised for doing what the app asked is what proves the
+  behaviour was unintended rather than a judgement call.
+- The signal is inside the noise: 1 RPE ≈ 1 rep ≈ 2.9% of e1RM at 3 reps,
+  against ~1% rating error (Helms 2017) and 1.25–3.33% CV for a proper 1RM in
+  trained men. The observed drop was 2.8%, from one set taken at peak block
+  fatigue and applied after the deload that resolves it.
+- It blinded both regression detectors — §5.3(a) measures the probe against the
+  reference, and the unconditional `stalls = 0` hid the stall it should count.
+- Asymmetric loss decides it: a reference 3% high costs one visibly
+  under-performed set; 3% low costs an undetectable sub-threshold block, which
+  is the v2 failure v3 exists to fix.
+
+**Applies retroactively.** The reference is derived from the log on every read,
+never stored, so any past test week that pulled it down is undone the moment the
+fix ships.
+
+**Known gap, accepted:** R1 removes the engine's only downward path. §1.4's
+"reset the reference 5% and rebuild" is prose the review tool prints, not code,
+and the reviewer's R2 ("deload first, then confirm") depends on §5.3's reactive
+trigger, which is not built. Until it is, genuine detraining should **prompt**
+via the review flags rather than silently move loads.
+
 ## 2026-09-30 — Upper Pull: lat pulldown → straight-arm cable pullover (program v4)
 
 **What:** Day C's third exercise changes from the lat pulldown to a straight-arm

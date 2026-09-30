@@ -138,3 +138,92 @@ test('v2 sessions seed the reference through their top set but their back-offs n
   assert.equal(r.source, 'probe');
   assert.equal(r.lastBackoffLoad, null, 'v2 back-offs at 85% of a top set are not double-progression evidence');
 });
+
+// ---------------------------------------------------------------------------
+// R1 — the test-week seed is monotone (research/REVIEW-reference-seeding.md)
+// ---------------------------------------------------------------------------
+
+/** seed probe → reference 102, then a test week, then the deload that applies it. */
+const afterTest = (testLoad, testReps = 3, testRpe = 9) =>
+  blockReference(
+    [
+      row('2026-09-01', [probe(85, 4, 8)]), // 102
+      row('2026-09-15', [probe(testLoad, testReps, testRpe)], { role: 'test' }),
+      row('2026-09-22', [probe(75, 3, 6)], { role: 'deload', isDeload: true }),
+    ],
+    block,
+    incline,
+  );
+
+test('a test triple ABOVE the reference still seeds the next block', () => {
+  // The behaviour that must survive the fix.
+  const r = afterTest(95); // 95 × (1 + 4/30) = 107.67
+  assert.ok(Math.abs(r.e1rm - 95 * (1 + 4 / 30)) < 1e-9);
+  assert.equal(r.source, 'test');
+  assert.equal(r.stalls, 0);
+});
+
+test('a test triple BELOW the reference leaves it — and its source and date — alone', () => {
+  // 80 × (1 + 4/30) = 90.67, under the 102 already banked.
+  const r = afterTest(80);
+  assert.equal(r.e1rm, 102);
+  assert.equal(r.source, 'probe', 'not relabelled as test-set');
+  assert.equal(r.date, '2026-09-01', 'still dated to the session that earned it');
+});
+
+test('a low test does not reset the stall counter — that is how a real stall stays reachable', () => {
+  // Two heavy sessions without a raise (the test week itself, and the probe
+  // before it that only matched). Zeroing on the deload hid exactly this.
+  const r = afterTest(80);
+  assert.ok(r.stalls >= 1, `stalls ${r.stalls} should keep accumulating across the deload`);
+});
+
+test('a test that exactly matches the reference changes nothing — a tie is not evidence', () => {
+  // The load whose 3-rep RPE-9 e1RM is exactly 102.
+  const exact = 102 / (1 + 4 / 30);
+  const r = afterTest(exact);
+  assert.equal(r.e1rm, 102);
+  assert.equal(r.source, 'probe');
+});
+
+test('a test performed EXACTLY as prescribed can never lower the reference', () => {
+  // The bug in one line: the probe is prefilled at round(ref / 1.1333), and
+  // that rounding goes down about half the time. Doing precisely what the app
+  // asked for used to cost you up to ~1.2% of your working loads.
+  for (const startRef of [90, 93, 95, 96, 97, 98, 100, 102.5, 104, 106, 110]) {
+    const prescribed = loadForReps(startRef, 3, 9, incline); // what the app fills in
+    const r = blockReference(
+      [
+        // A probe that establishes exactly `startRef`, then the prescribed test.
+        row('2026-09-01', [probe(startRef / (1 + 6 / 30), 4, 8)]),
+        row('2026-09-15', [probe(prescribed, 3, 9)], { role: 'test' }),
+        row('2026-09-22', [probe(70, 3, 6)], { role: 'deload', isDeload: true }),
+      ],
+      block,
+      incline,
+    );
+    assert.ok(
+      r.e1rm >= startRef - 1e-9,
+      `reference fell ${(startRef - r.e1rm).toFixed(2)} kg from ${startRef} after a textbook test set at ${prescribed} kg`,
+    );
+  }
+});
+
+test('the reference is monotone across a whole block, whatever the test says', () => {
+  // The invariant the fix buys: fold the history one row at a time and the
+  // reference never decreases. Nothing in the engine walks it down.
+  const history = [
+    row('2026-09-01', [probe(85, 4, 8), bo(82.5, 6, 8), bo(82.5, 6, 8), bo(82.5, 6, 8)]),
+    row('2026-09-08', [probe(85, 4, 8), bo(85, 5, 8.5), bo(85, 5, 8.5), bo(85, 5, 8.5)]),
+    row('2026-09-15', [probe(72.5, 3, 9)], { role: 'test' }), // a bad day
+    row('2026-09-22', [probe(70, 3, 6), bo(82.5, 4, 6)], { role: 'deload', isDeload: true }),
+    row('2026-09-29', [probe(85, 4, 8), bo(85, 6, 8), bo(85, 6, 8), bo(85, 6, 8)]),
+  ];
+  let previous = 0;
+  for (let i = 1; i <= history.length; i++) {
+    const { e1rm } = blockReference(history.slice(0, i), block, incline);
+    if (e1rm == null) continue;
+    assert.ok(e1rm >= previous - 1e-9, `reference dropped ${previous} → ${e1rm} at row ${i}`);
+    previous = e1rm;
+  }
+});

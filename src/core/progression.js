@@ -200,8 +200,10 @@ export function impliedRpe(referenceE1rm, load, reps) {
  *
  * Rules (SYNTHESIS §1.1, §1.4):
  *  - Seed: the first probe of the block (sets ≤ 6 reps). A test-week probe
- *    (RPE 9) sets the NEXT block's reference — it is applied once the deload
- *    that follows it has been passed, not to the block it was lifted in.
+ *    (RPE 9) sets the NEXT block's reference — applied once the deload that
+ *    follows it has been passed, not to the block it was lifted in, and only
+ *    if it BEATS the current reference. The reference is monotone: every clause
+ *    here moves it up or leaves it alone. Nothing in the engine moves it down.
  *  - Raise on a later probe at ≤ RPE 8 whose e1RM beats the reference.
  *  - Raise when every back-off set reaches repMax at ≤ RPE 8.5 — to the
  *    reference whose 80% is exactly one increment above the load just lifted.
@@ -233,12 +235,35 @@ export function blockReference(rows, block, exercise) {
 
   for (const row of rows ?? []) {
     if (row.isDeload) {
-      // Passing the deload is what starts the next block.
+      // Passing the deload is what starts the next block, and is where a
+      // pending test-week seed lands — but ONLY if it beats what is already
+      // there. A test triple may raise the reference; it may never lower it.
+      //
+      // Applying it unconditionally looked reasonable and was not. The probe is
+      // prefilled at round(reference / 1.1333), and that rounding goes down
+      // about half the time, so a test performed at exactly the prescribed
+      // load, reps and RPE seeded a LOWER reference — being penalised for doing
+      // what you were told is the proof the behaviour was unintended. Beyond
+      // that the signal is inside the noise (1 RPE ≈ 1 rep ≈ 2.9% of e1RM at 3
+      // reps, against ~1% rating error), it is one set taken at peak block
+      // fatigue and applied after the deload that resolves it, and letting it
+      // move the reference down blinds both regression detectors: §5.3(a)
+      // measures the probe against the reference, and the stall counter reset
+      // hides exactly the stall it should be counting.
+      //
+      // The asymmetry decides it: a reference 3% high costs one visibly
+      // under-performed set, which you notice. 3% low costs an undetectable
+      // sub-threshold block — the v2 failure this whole scheme exists to fix.
+      // See research/REVIEW-reference-seeding.md (R1).
       if (pendingSeed != null) {
-        ref = pendingSeed.e1rm;
-        source = 'test';
-        date = pendingSeed.date;
-        stalls = 0;
+        if (ref == null || pendingSeed.e1rm > ref) {
+          ref = pendingSeed.e1rm;
+          source = 'test';
+          date = pendingSeed.date;
+          stalls = 0;
+        }
+        // Discarded either way: a seed that did not beat the reference leaves
+        // `stalls` accumulating, which is what makes a genuine stall reachable.
         pendingSeed = null;
       }
       continue;

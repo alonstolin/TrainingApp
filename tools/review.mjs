@@ -191,10 +191,11 @@ for (const liftId of MAIN_LIFTS) {
     const bos = (r.sets ?? []).filter((s) => s.done && s.type === 'backoff');
     const probeE1 = probe ? e1rm(effectiveLoad(probe, ex, r.bodyweightKg), probe.reps, probe.rpe) : null;
 
-    // A raise is the reference reaching a NEW HIGH. Counting every upward step
-    // instead double-counted recovery from the test-week seed, which can move
-    // the reference DOWN on the deload row — so the next session's return to
-    // the old number read as progress that was never made.
+    // A raise is the reference reaching a NEW HIGH, not merely an upward step.
+    // The engine is monotone since R1, so the two now coincide for anything
+    // logged under the fix — but this report is also read over history that
+    // predates it, where a test-week seed could drop the reference and the next
+    // session's climb back to the old number read as progress never made.
     if (after.e1rm != null) {
       // The first value seen is the baseline, not an increase.
       if (peak == null) peak = after.e1rm;
