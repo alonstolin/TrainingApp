@@ -21,7 +21,7 @@ import { downsample } from '../../core/geo.js';
 import { openSheet, confirmSheet } from '../sheet.js';
 import { toast, undoToast } from '../toast.js';
 import * as store from '../../data/store.js';
-import { getExercise, EXERCISES, MUSCLE_LABELS } from '../../program/exercises.js';
+import { getExercise, allExercises, MUSCLE_LABELS } from '../../program/exercises.js';
 import { formatRelativeDate, formatDuration } from '../../core/dates.js';
 import { paceSecPerKm, formatPace, effectiveLoad, e1rm, runLoadWarnings } from '../../core/progression.js';
 import { sessionIntegrity } from '../../core/schema.js';
@@ -94,45 +94,202 @@ function header(session, onFinish, onChange) {
 }
 
 /**
+ * A picker over every exercise the app knows — catalogue plus the athlete's
+ * own — with a filter box and a way to add one the catalogue has never heard
+ * of. Fifty-odd exercises in a bottom sheet is a lot of scrolling, and no
+ * catalogue is ever going to contain every machine in every gym, so both the
+ * search and the escape hatch are load-bearing rather than polish.
+ *
+ * @param o { title, subtitle, sections, modality, muscle, onPick(exercise) }
+ *        `sections` are pinned above the search results (e.g. Recommended).
+ */
+function exercisePicker({ title, subtitle, sections = [], modality = 'lift', muscle = null, excludeId = null, onPick }) {
+  let close = () => {};
+  const pick = (e) => {
+    close();
+    onPick(e);
+  };
+
+  const rowFor = (e, sub) =>
+    onTap(
+      el(
+        'button.listitem',
+        { type: 'button', dataset: { pickExercise: e.id } },
+        el('span.grow', null,
+          el('div.listitem-title', { text: e.name }),
+          sub ? el('div.listitem-sub.truncate', { text: sub }) : null,
+        ),
+        e.custom ? el('span.pill', { text: 'YOURS' }) : e.gymSpecific ? el('span.pill', { text: 'STACK' }) : null,
+      ),
+      () => pick(e),
+    );
+
+  const pool = Object.values(allExercises()).filter(
+    (e) => !e.retired && e.modality === modality && e.modality !== 'run' && e.id !== excludeId,
+  );
+  const pinnedIds = new Set(sections.flatMap((sec) => sec.items.map((e) => e.id)));
+
+  const search = el('input.searchfield', {
+    type: 'search',
+    inputmode: 'search',
+    autocomplete: 'off',
+    autocorrect: 'off',
+    spellcheck: 'false',
+    placeholder: 'Search exercises…',
+    'aria-label': 'Search exercises',
+    dataset: { exerciseSearch: '' },
+  });
+  const results = el('div.stack', { dataset: { pickerResults: '' } });
+
+  const create = (name) =>
+    onTap(
+      el('button.listitem', { type: 'button', dataset: { createExercise: '' } },
+        el('span.grow', null,
+          el('div.listitem-title', { text: name ? `Add "${name}"` : '+ Add an exercise of your own' }),
+          el('div.listitem-sub', { text: 'For a machine this catalogue does not have. It keeps its own history.' }),
+        ),
+      ),
+      () => {
+        close();
+        customExerciseSheet({ name, muscle, modality, onCreate: onPick });
+      },
+    );
+
+  const paint = () => {
+    const q = search.value.trim().toLowerCase();
+    results.textContent = '';
+
+    if (!q) {
+      for (const sec of sections) {
+        if (!sec.items.length) continue;
+        results.appendChild(el('div.section-label', { text: sec.label }));
+        results.appendChild(el('div.listgroup', null, ...sec.items.map((e) => rowFor(e, sec.sub?.(e)))));
+      }
+      const byMuscle = new Map();
+      for (const e of pool) {
+        if (pinnedIds.has(e.id)) continue;
+        const key = e.muscle ?? 'other';
+        if (!byMuscle.has(key)) byMuscle.set(key, []);
+        byMuscle.get(key).push(e);
+      }
+      const order = [...byMuscle.entries()].sort(([a], [b]) =>
+        a === muscle ? -1 : b === muscle ? 1 : (MUSCLE_LABELS[a] ?? a).localeCompare(MUSCLE_LABELS[b] ?? b),
+      );
+      for (const [m, list] of order) {
+        results.appendChild(el('div.section-label', { text: MUSCLE_LABELS[m] ?? m }));
+        results.appendChild(el('div.listgroup', null, ...list.map((e) => rowFor(e))));
+      }
+      results.appendChild(el('div.listgroup', { style: { marginTop: '0.75rem' } }, create('')));
+      return;
+    }
+
+    const hits = pool
+      .filter((e) => `${e.name} ${e.short} ${MUSCLE_LABELS[e.muscle] ?? ''}`.toLowerCase().includes(q))
+      .sort((a, b) => a.name.localeCompare(b.name));
+    results.appendChild(
+      hits.length
+        ? el('div.listgroup', null, ...hits.map((e) => rowFor(e, MUSCLE_LABELS[e.muscle] ?? '')))
+        : el('p.small.muted', { text: `Nothing in the catalogue matches "${search.value.trim()}".` }),
+    );
+    results.appendChild(el('div.listgroup', { style: { marginTop: '0.75rem' } }, create(search.value.trim())));
+  };
+
+  search.addEventListener('input', paint);
+  paint();
+
+  close = openSheet({ title, subtitle, content: el('div.stack', null, search, results) });
+  return close;
+}
+
+/**
+ * Define an exercise the catalogue does not have. Deliberately short: a name
+ * and what it trains is enough to log and track it, and anything else can be
+ * corrected later from Progress.
+ */
+function customExerciseSheet({ name = '', muscle = null, modality = 'lift', onCreate }) {
+  const draft = { name, muscle, metric: modality === 'core' ? 'reps' : 'weight_reps', equipment: 'machine', increment: 2.5, perSide: false };
+  let close = () => {};
+
+  const nameField = el('input.searchfield', {
+    type: 'text', autocomplete: 'off', autocapitalize: 'words', spellcheck: 'false',
+    value: name, placeholder: 'e.g. Converging row machine', 'aria-label': 'Exercise name',
+    dataset: { customName: '' },
+  });
+  nameField.addEventListener('input', () => {
+    draft.name = nameField.value;
+  });
+
+  const muscleChips = el('div.chips.chips--scroll');
+  for (const [key, label] of Object.entries(MUSCLE_LABELS)) {
+    const b = el('button.chip', { type: 'button', text: label, 'aria-pressed': String(draft.muscle === key), dataset: { muscle: key } });
+    onTap(b, () => {
+      draft.muscle = draft.muscle === key ? null : key;
+      for (const c of muscleChips.children) c.setAttribute('aria-pressed', 'false');
+      if (draft.muscle) b.setAttribute('aria-pressed', 'true');
+    });
+    muscleChips.appendChild(b);
+  }
+
+  const kindChips = el('div.chips');
+  for (const [metric, label] of [['weight_reps', 'Weight × reps'], ['reps', 'Reps only'], ['time', 'Timed hold']]) {
+    const b = el('button.chip', { type: 'button', text: label, 'aria-pressed': String(draft.metric === metric) });
+    onTap(b, () => {
+      draft.metric = metric;
+      for (const c of kindChips.children) c.setAttribute('aria-pressed', 'false');
+      b.setAttribute('aria-pressed', 'true');
+    });
+    kindChips.appendChild(b);
+  }
+
+  const stackChip = el('button.chip', { type: 'button', text: 'Stack or machine — load differs between gyms', 'aria-pressed': 'true' });
+  onTap(stackChip, () => {
+    draft.equipment = draft.equipment === 'machine' ? 'barbell' : 'machine';
+    stackChip.setAttribute('aria-pressed', String(draft.equipment === 'machine'));
+  });
+
+  close = openSheet({
+    title: 'Add an exercise',
+    subtitle: 'Yours to keep. It behaves like any other exercise: its own history, its own progression, and it travels in your backup.',
+    content: el('div.stack', null,
+      el('div', null, el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'Name'), nameField),
+      el('div', null, el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'Trains'), muscleChips),
+      el('div', null, el('div.eyebrow', { style: { marginBottom: '0.4rem' } }, 'Logged as'), kindChips),
+      el('div', null, stackChip),
+    ),
+    actions: [
+      {
+        label: 'Add it',
+        onSelect: () => {
+          const ex = store.addCustomExercise(draft);
+          if (!ex) {
+            toast('Give it a name first');
+            return;
+          }
+          onCreate?.(ex);
+        },
+      },
+      { label: 'Cancel', variant: 'ghost' },
+    ],
+  });
+  requestAnimationFrame(() => nameField.focus());
+  return close;
+}
+
+/**
  * Swap an entry for another exercise — the station is taken, the bar is
  * bent, the dumbbells stop at 30. Recommended substitutes first (same job,
- * different equipment), then anything grouped by muscle. With a gym set the
- * swap can be made standing: "always at this gym".
+ * different equipment), then anything grouped by muscle, then a search box and
+ * the option to add one of your own. With a gym set the swap can be made
+ * standing: "always at this gym".
  */
 function swapSheet(session, entry, snapEntry, onDone) {
   const ex = getExercise(entry.exerciseId);
   const original = entry.swappedFrom ?? entry.exerciseId;
   const originalEx = getExercise(original);
+  const catalogue = allExercises();
   const recommended = [...new Set([...(originalEx.alternatives ?? []), ...(ex.alternatives ?? [])])]
-    .filter((id) => id !== entry.exerciseId && EXERCISES[id] && !EXERCISES[id].retired);
-  const modality = originalEx.modality;
-  const byMuscle = new Map();
-  for (const e of Object.values(EXERCISES)) {
-    if (e.retired || e.modality !== modality || e.id === entry.exerciseId || recommended.includes(e.id)) continue;
-    if (e.modality === 'run') continue;
-    const key = e.muscle ?? 'other';
-    if (!byMuscle.has(key)) byMuscle.set(key, []);
-    byMuscle.get(key).push(e);
-  }
-  // The original's muscle first, then the rest alphabetically.
-  const groups = [...byMuscle.entries()].sort(([a], [b]) =>
-    a === originalEx.muscle ? -1 : b === originalEx.muscle ? 1 : (MUSCLE_LABELS[a] ?? a).localeCompare(MUSCLE_LABELS[b] ?? b),
-  );
-
-  let close = () => {};
-  const row = (e, sub) =>
-    onTap(
-      el(
-        'button.listitem',
-        { type: 'button', dataset: { swapTo: e.id } },
-        el('span.grow', null, el('div.listitem-title', { text: e.name }), sub ? el('div.listitem-sub.truncate', { text: sub }) : null),
-        e.gymSpecific ? el('span.pill', { text: 'STACK' }) : null,
-      ),
-      () => {
-        close();
-        choose(e);
-      },
-    );
+    .filter((id) => id !== entry.exerciseId && catalogue[id] && !catalogue[id].retired)
+    .map((id) => getExercise(id));
 
   const choose = (e) => {
     const gymId = session.gymId;
@@ -142,6 +299,8 @@ function swapSheet(session, entry, snapEntry, onDone) {
       toast(e.id === original ? `Back to ${e.short}` : `Swapped to ${e.short}${standing ? ' — always here' : ''}`);
       onDone();
     };
+    // "Always at this gym" only means something once there is a gym to pin it
+    // to; otherwise a swap is simply for today.
     if (gymId == null || e.id === original) {
       apply(false);
       return;
@@ -157,72 +316,65 @@ function swapSheet(session, entry, snapEntry, onDone) {
     });
   };
 
-  const content = el('div.stack');
+  const sections = [];
   if (entry.swappedFrom) {
-    content.appendChild(el('div.section-label', { style: { marginTop: 0 }, text: 'Programmed' }));
-    content.appendChild(el('div.listgroup', null, row(originalEx, 'Back to the programmed exercise')));
+    sections.push({ label: 'Programmed', items: [originalEx], sub: () => 'Back to the programmed exercise' });
   }
   if (recommended.length) {
-    content.appendChild(el('div.section-label', { style: { marginTop: entry.swappedFrom ? undefined : 0 }, text: 'Recommended' }));
-    content.appendChild(el('div.listgroup', null, ...recommended.map((id) => row(getExercise(id), getExercise(id).cue))));
-  }
-  for (const [muscle, list] of groups) {
-    content.appendChild(el('div.section-label', { text: MUSCLE_LABELS[muscle] ?? muscle }));
-    content.appendChild(el('div.listgroup', null, ...list.map((e) => row(e))));
+    sections.push({ label: 'Recommended', items: recommended, sub: (e) => e.cue });
   }
 
-  close = openSheet({
+  exercisePicker({
+    excludeId: entry.exerciseId,
     title: `Swap ${ex.short}`,
     subtitle: `${snapEntry.label ?? ''} stays the same — the load and "last time" come from the exercise you pick.`,
-    content,
+    sections,
+    modality: originalEx.modality,
+    muscle: originalEx.muscle,
+    onPick: choose,
   });
 }
 
 /** Append an exercise to the session — for when a set is already logged. */
 function addExerciseSheet(session, onDone) {
-  let close = () => {};
-  const byMuscle = new Map();
-  for (const e of Object.values(EXERCISES)) {
-    if (e.retired || e.modality === 'run') continue;
-    const key = e.muscle ?? 'other';
-    if (!byMuscle.has(key)) byMuscle.set(key, []);
-    byMuscle.get(key).push(e);
-  }
-  const content = el('div.stack');
-  for (const [muscle, list] of [...byMuscle.entries()].sort(([a], [b]) => (MUSCLE_LABELS[a] ?? a).localeCompare(MUSCLE_LABELS[b] ?? b))) {
-    content.appendChild(el('div.section-label', { text: MUSCLE_LABELS[muscle] ?? muscle }));
-    content.appendChild(
-      el(
-        'div.listgroup',
-        null,
-        ...list.map((e) =>
-          onTap(el('button.listitem', { type: 'button' }, el('span.grow', null, el('div.listitem-title', { text: e.name }))), () => {
-            close();
-            store.addEntry(session.id, e.id);
-            toast(`Added ${e.short}`);
-            onDone();
-          }),
-        ),
-      ),
-    );
-  }
-  close = openSheet({ title: 'Add an exercise', subtitle: 'Appended to the end of this session, three sets by default.', content });
+  exercisePicker({
+    title: 'Add an exercise',
+    subtitle: 'Appended to the end of this session, three sets by default.',
+    modality: session.kind === 'core' ? 'core' : 'lift',
+    onPick: (e) => {
+      store.addEntry(session.id, e.id);
+      toast(`Added ${e.short}`);
+      onDone();
+    },
+  });
 }
 
-/** Tag which station this entry was done on — remembered per exercise per gym. */
+/**
+ * Tag which machine this entry was done on.
+ *
+ * The point is consistent logs: two cable stacks of the same make rarely pull
+ * the same weight, so 40 on one is not 40 on the other, and an untagged mix of
+ * the two is a progression line that means nothing. Tagging is available
+ * whether or not gyms are set up — with a gym the tag is scoped to it, without
+ * one the tag alone does the scoping.
+ */
 function stationSheet(session, entry, onDone) {
   const known = store.stationsFor(entry.exerciseId, session.gymId);
   const set = (station) => {
     store.reresolveEntry(session.id, entry.entryId, { station });
+    if (station) toast(`Logging against "${station}"`);
     onDone();
   };
   openSheet({
-    title: 'Which station?',
-    subtitle: 'Two cable machines in one gym rarely pull the same. Tag the one you are on and its history stays its own.',
+    title: 'Which machine?',
+    subtitle:
+      known.length
+        ? 'Pick the one you are on — its own numbers come back next time.'
+        : 'Name the machine you are on. Next time it will be offered here, and its numbers stay its own.',
     actions: [
       ...known.map((k) => ({ label: k + (entry.station === k ? ' · current' : ''), onSelect: () => set(k) })),
-      { label: 'New station…', onSelect: () => textSheet({ title: 'Station name', placeholder: 'e.g. left stack', onSubmit: (v) => set(v) }) },
-      ...(entry.station ? [{ label: 'No station', variant: 'ghost', onSelect: () => set(null) }] : []),
+      { label: known.length ? 'A different one…' : 'Name this machine…', onSelect: () => textSheet({ title: 'Machine or station', placeholder: 'e.g. left stack, window side', onSubmit: (v) => set(v) }) },
+      ...(entry.station ? [{ label: 'Untagged', variant: 'ghost', onSelect: () => set(null) }] : []),
       { label: 'Cancel', variant: 'ghost' },
     ],
   });
@@ -480,9 +632,13 @@ function mountLift(screen, session, ctx) {
               'div.lasttime',
               null,
               el('div.lasttime-label', {
-                text: `Last time · ${formatRelativeDate(snapEntry.lastTime.date, session.date)}${
-                  snapEntry.scope === 'other' ? ' · other gym' : ''
-                }`,
+                // Where that number came from, in as few words as fit: the
+                // machine it was lifted on, and whether it is comparable at
+                // all. The suggestion line below carries the full caveat.
+                text:
+                  `Last time · ${formatRelativeDate(snapEntry.lastTime.date, session.date)}` +
+                  (snapEntry.lastTime.station ? ` · ${snapEntry.lastTime.station}` : '') +
+                  (snapEntry.scope !== 'other' ? '' : session.gymId != null ? ' · other gym' : ' · different machine'),
               }),
               el('div.lasttime-sets', { text: fmtSets(snapEntry.lastTime.sets) }),
             )
@@ -502,11 +658,13 @@ function mountLift(screen, session, ctx) {
         el(
           'div.btn-row',
           { style: { marginTop: '0.25rem' } },
-          ex.gymSpecific && session.gymId != null
+          // Stack and machine work can be tagged with the machine used, gyms
+          // configured or not — that tag is what keeps the numbers comparable.
+          ex.gymSpecific
             ? onTap(
-                el('button.btn.btn--sm.btn--ghost', {
+                el(`button.btn.btn--sm${entry.station ? '' : '.btn--ghost'}`, {
                   type: 'button',
-                  text: entry.station ? `Station: ${entry.station}` : 'Station: any',
+                  text: entry.station ? `⚙ ${entry.station}` : '⚙ Which machine?',
                   dataset: { station: '' },
                   ...(entry.sets.some((x) => x.done) ? { disabled: 'true' } : {}),
                 }),

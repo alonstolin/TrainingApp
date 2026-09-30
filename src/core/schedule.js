@@ -327,15 +327,21 @@ export function makeHistoryLookup(sessions, index) {
     // stack's 40 is not another gym's 40). Exact station first, then the same
     // gym, then anywhere — and the row says how far it had to reach so the
     // prescription can call a foreign number a guide rather than a target.
+    const tag = (rows, scope) => rows.map((r) => ({ ...r, scope }));
     if (opts?.gymId != null) {
       const sameGym = candidates.filter((r) => r.gymId === opts.gymId);
       const exact = opts.station != null ? sameGym.filter((r) => r.station === opts.station) : sameGym;
-      const tag = (rows, scope) => rows.map((r) => ({ ...r, scope }));
       candidates = exact.length
         ? tag(exact, opts.station != null ? 'exact' : 'gym')
         : sameGym.length
           ? tag(sameGym, 'gym')
           : tag(candidates, 'other');
+    } else if (opts?.station != null) {
+      // No gyms configured, but the machine was tagged. Two stacks of the same
+      // make still do not weigh the same, so the tag alone is worth scoping by;
+      // fall back to everything, labelled, when that station is new.
+      const exact = candidates.filter((r) => r.station === opts.station);
+      candidates = exact.length ? tag(exact, 'exact') : tag(candidates, 'other');
     }
     if (opts?.all) return candidates;
     return candidates[0] ?? null;

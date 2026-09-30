@@ -20,7 +20,9 @@ import { CURRENT_PROGRAM, PROGRAMS } from '../program/index.js';
 import { deriveCursors, makeHistoryLookup } from '../core/schedule.js';
 import { resolveBlock, weekModifier } from '../core/prescribe.js';
 import { backoffLoad, loadFromReference, e1rm, effectiveLoad } from '../core/progression.js';
-import { getExercise, setIncrementOverrides } from '../program/exercises.js';
+import {
+  getExercise, setIncrementOverrides, setCustomExercises, defineCustomExercise, slugify, CUSTOM_PREFIX,
+} from '../program/exercises.js';
 import { makeRoute } from '../core/routes.js';
 
 const PERSIST_DEBOUNCE_MS = 250;
@@ -212,6 +214,7 @@ export function setMeta(patch) {
   // change here has to be pushed across or the next session is resolved with the
   // old step size.
   if ('increments' in patch) setIncrementOverrides(state.meta.increments);
+  if ('customExercises' in patch) setCustomExercises(state.meta.customExercises);
   metaDirty = true;
   schedulePersist();
   notify();
@@ -241,9 +244,11 @@ export async function init() {
     state.meta = { ...DEFAULT_META };
   }
 
-  // Custom increments are configuration for the pure prescription layer, so they
-  // have to be installed before anything resolves a session.
+  // Custom increments and custom exercises are configuration for the pure
+  // prescription layer, so both have to be installed before anything resolves
+  // a session — otherwise a session referencing one renders as a placeholder.
   setIncrementOverrides(state.meta.increments);
+  setCustomExercises(state.meta.customExercises);
 
   // First launch IS day one. Without this the drift calculation has no anchor
   // and the Today screen can never tell you that you are behind.
@@ -620,7 +625,36 @@ export function setSubstitution(gymId, exerciseId, altId) {
   setMeta({ substitutions: subs });
 }
 
-/** Station tags seen for an exercise at a gym, most recent first. */
+/**
+ * Add an exercise the catalogue does not have. Returns the stored record.
+ *
+ * The id is derived from the name and made unique, because ids are permanent:
+ * two machines both called "Row" must not end up sharing a history.
+ */
+export function addCustomExercise(spec) {
+  const existing = state.meta.customExercises ?? {};
+  let id = `${CUSTOM_PREFIX}${slugify(spec.name)}`;
+  for (let n = 2; existing[id]; n++) id = `${CUSTOM_PREFIX}${slugify(spec.name)}-${n}`;
+  const ex = defineCustomExercise({ ...spec, id });
+  if (!ex) return null;
+  setMeta({ customExercises: { ...existing, [id]: ex } });
+  return ex;
+}
+
+/** Rename or retire one. History keeps the id, so nothing logged is lost. */
+export function updateCustomExercise(id, patch) {
+  const existing = state.meta.customExercises ?? {};
+  if (!existing[id]) return null;
+  const next = { ...existing[id], ...patch };
+  setMeta({ customExercises: { ...existing, [id]: next } });
+  return next;
+}
+
+/**
+ * Station tags seen for an exercise, most recent first. With a gym set, only
+ * that gym's; with none configured, every station it has been logged on — the
+ * tag is what keeps the numbers comparable either way.
+ */
 export function stationsFor(exerciseId, gymId) {
   const seen = [];
   for (const row of state.index.get(exerciseId) ?? []) {

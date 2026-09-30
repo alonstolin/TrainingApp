@@ -35,6 +35,8 @@ export const DEFAULT_META = {
   lastGymId: null,
   /** gymId → { exerciseId → substitute exerciseId } — "always at this gym". */
   substitutions: {},
+  /** Exercises the athlete added himself, by id. See program/exercises.js. */
+  customExercises: {},
 };
 
 /** Migration chain: index N upgrades vN → vN+1. Append, never rewrite. */
@@ -48,6 +50,7 @@ const MIGRATIONS = [
       gyms: data.meta?.gyms ?? [],
       bodyweightLog: data.meta?.bodyweightLog ?? [],
       substitutions: data.meta?.substitutions ?? {},
+      customExercises: data.meta?.customExercises ?? {},
     },
   }),
 ];

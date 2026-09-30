@@ -105,7 +105,15 @@ export function resolveBlock(program, block, ctx, over = {}) {
 
   const last = lookup({});
   const basis = lookup({ forProgression: true }) ?? last;
-  const scopeNote = last?.scope === 'other' ? ' From another gym — treat it as a guide, not a target.' : '';
+  // "Other" means the only history available came from a different gym, or a
+  // different machine when no gyms are set up. Either way the number is not
+  // comparable, so the prescription says so rather than presenting it as a target.
+  const scopeNote =
+    last?.scope !== 'other'
+      ? ''
+      : ctx.gymId != null
+        ? ' From another gym — treat it as a guide, not a target.'
+        : ' From a different machine — treat it as a guide, not a target.';
 
   // Race week: legs light. Only blocks whose primary muscle is a leg muscle —
   // pull-ups and curls on the same day are upper-body work and stay intact.

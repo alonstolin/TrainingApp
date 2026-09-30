@@ -498,6 +498,70 @@ export const EXERCISES = Object.fromEntries(
  */
 let INCREMENT_OVERRIDES = {};
 
+/**
+ * Exercises the athlete added himself, by id.
+ *
+ * The catalogue cannot know every machine in every gym, and a session logged
+ * against "that odd converging row" is worth more than one logged against a
+ * near-enough substitute. Custom exercises are stored in meta (so they travel
+ * in the backup) and installed here at boot, exactly like the increment
+ * overrides above — the prescription layer stays pure and still resolves
+ * everything through `getExercise`.
+ *
+ * Their ids carry the `custom:` prefix, which is what guarantees they can
+ * never collide with a catalogue slug — the one rule that keeps logged history
+ * readable forever.
+ */
+let CUSTOM = {};
+
+export const CUSTOM_PREFIX = 'custom:';
+export const isCustomId = (id) => typeof id === 'string' && id.startsWith(CUSTOM_PREFIX);
+
+/** Build a custom exercise record from what the UI collected. */
+export function defineCustomExercise({ id, name, muscle = null, metric = 'weight_reps', equipment = 'machine', increment = 2.5, perSide = false, cue = '' }) {
+  const clean = String(name ?? '').trim();
+  if (!clean) return null;
+  return {
+    ...def(id ?? `${CUSTOM_PREFIX}${slugify(clean)}`, clean, {
+      short: clean.length > 16 ? `${clean.slice(0, 15)}…` : clean,
+      muscle,
+      metric,
+      unit: metric === 'time' ? 's' : 'kg',
+      equipment,
+      increment,
+      perSide,
+      cue,
+    }),
+    custom: true,
+  };
+}
+
+/** A stable, readable id fragment. Collisions are resolved by the caller. */
+export function slugify(name) {
+  return String(name)
+    .toLowerCase()
+    .normalize('NFKD')
+    // Drop the combining marks NFKD just split off, so "Über" becomes "uber"
+    // rather than "u-ber".
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 40) || 'exercise';
+}
+
+export function setCustomExercises(map) {
+  CUSTOM = map && typeof map === 'object' ? { ...map } : {};
+}
+
+export function getCustomExercises() {
+  return { ...CUSTOM };
+}
+
+/** Catalogue + the athlete's own, which is what every picker should offer. */
+export function allExercises() {
+  return { ...EXERCISES, ...CUSTOM };
+}
+
 export function setIncrementOverrides(map) {
   INCREMENT_OVERRIDES = map && typeof map === 'object' ? { ...map } : {};
 }
@@ -509,7 +573,7 @@ export function getIncrementOverrides() {
 /** Safe lookup — returns a placeholder rather than throwing, so old logs always render. */
 export function getExercise(id) {
   const override = INCREMENT_OVERRIDES[id];
-  const base = EXERCISES[id];
+  const base = EXERCISES[id] ?? CUSTOM[id];
   if (base) return override ? { ...base, increment: override } : base;
   return (
     EXERCISES[id] ?? {

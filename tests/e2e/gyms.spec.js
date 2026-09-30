@@ -55,10 +55,10 @@ test('a station tag scopes history within a gym; a swap can be made standing for
   // Cable laterals are the third entry and gym-specific: tag the station.
   await page.locator('.exnav button', { hasText: 'Cable Lateral' }).click();
   await page.locator('[data-station]').click();
-  await page.locator('.sheet button', { hasText: 'New station' }).click();
+  await page.locator('.sheet button', { hasText: 'Name this machine' }).click();
   await page.locator('.numfield').fill('left stack');
   await page.locator('.sheet button', { hasText: /^Save$/ }).click();
-  await expect(page.locator('[data-station]')).toHaveText('Station: left stack');
+  await expect(page.locator('[data-station]')).toHaveText('⚙ left stack');
 
   // Log all three sets at 20 kg and finish.
   const plus = page.locator('.stepper').nth(0).locator('button', { hasText: '+' });
@@ -87,7 +87,7 @@ test('a station tag scopes history within a gym; a swap can be made standing for
 
   // Swap the cable laterals for dumbbells — always at Downtown.
   await page.locator('[data-swap]').click();
-  await page.locator('[data-swap-to="db-lateral-raise"]').click();
+  await page.locator('[data-pick-exercise="db-lateral-raise"]').click();
   await page.locator('.sheet button', { hasText: 'Always at Downtown' }).click();
   await expect(page.locator('h2', { hasText: 'Dumbbell Lateral Raise' })).toBeVisible();
   await expect(page.locator('[data-swap]')).toHaveText('Swapped · change');

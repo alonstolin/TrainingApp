@@ -574,6 +574,12 @@
 .empty { text-align: center; padding: var(--sp-6) var(--sp-4); color: var(--ink-4); }
 .empty-mark { font-size: var(--fs-2xl); margin-bottom: var(--sp-2); opacity: 0.5; }
 
+/* A text field that is a text field: the base input styling, minus the search
+   widget's own furniture. 16px minimum or iOS zooms the viewport on focus. */
+.searchfield { font-size: 16px; font-weight: 500; }
+.searchfield::placeholder { color: var(--ink-4); font-weight: 400; }
+.searchfield::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
 /* ---- Numeric entry sheet -------------------------------------------------- */
 .numfield-wrap {
   display: flex;
