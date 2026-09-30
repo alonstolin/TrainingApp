@@ -78,7 +78,7 @@ const seedReport = await page.evaluate(async () => {
           'back-squat': 120, rdl: 100, 'leg-press': 180, 'leg-curl': 45, 'calf-raise': 80,
           'cable-lateral-raise': 12.5, 'machine-lateral-raise': 15,
           'overhead-cable-tricep': 25, 'ez-overhead-tricep': 30, 'rope-pushdown': 30,
-          'chest-supported-row': 70, 'lat-pulldown': 65, 'reverse-pec-deck': 35,
+          'chest-supported-row': 70, 'lat-pulldown': 65, 'straight-arm-pulldown': 35, 'reverse-pec-deck': 35,
           'face-pull': 25, 'incline-db-curl': 14, 'preacher-curl': 30, 'bayesian-curl': 15,
         };
         for (const entry of s.entries) {

@@ -27,7 +27,12 @@
 
 export default {
   programId: 'strength-hypertrophy-10k',
-  version: 3,
+  // v4 = v3 with the Upper Pull second vertical pull swapped for a straight-arm
+  // pullover (2026-09-30). Bumping is not bookkeeping: sessionIntegrity checks
+  // logged entries against the day's block list ONLY when the session's version
+  // equals the program's, so leaving this at 3 would flag every Upper Pull
+  // already in the log as a prescription mismatch.
+  version: 4,
   name: 'Strength · Shoulders & Arms · 10K',
 
   liftsPerWeek: 4,
@@ -140,7 +145,15 @@ export default {
           restSec: 210,
         },
         { exerciseId: 'chest-supported-row', scheme: 'double_progression', sets: 3, repMin: 8, repMax: 12, rpeCap: 9, restSec: 120 },
-        { exerciseId: 'lat-pulldown', scheme: 'double_progression', sets: 3, repMin: 10, repMax: 12, rpeCap: 9, restSec: 120 },
+        // Was a lat pulldown, which made this day two vertical pulls: EMG work
+        // has pulldowns and pull-ups activating the lats essentially equally,
+        // so the second one added elbow-flexor and trunk fatigue rather than
+        // lat stimulus. The straight-arm version is shoulder extension with the
+        // elbow fixed — a profile the weighted pull-up does not cover — and it
+        // drops a biceps credit this day does not need (five direct biceps sets
+        // follow it). See research/pull-day-vertical-redundancy.md; the
+        // prescription itself is unchanged from the slot it replaces.
+        { exerciseId: 'straight-arm-pulldown', scheme: 'double_progression', sets: 3, repMin: 10, repMax: 12, rpeCap: 9, restSec: 120 },
         { exerciseId: 'reverse-pec-deck', scheme: 'double_progression', sets: 3, repMin: 12, repMax: 15, rpeCap: 9, restSec: 75, lastSetToFailure: true },
         { exerciseId: 'incline-db-curl', scheme: 'double_progression', sets: 3, repMin: 8, repMax: 12, rpeCap: 9, restSec: 90, lastSetToFailure: true },
         { exerciseId: 'preacher-curl', scheme: 'double_progression', sets: 2, repMin: 10, repMax: 12, rpeCap: 9, restSec: 90, lastSetToFailure: true },

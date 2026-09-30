@@ -63,3 +63,32 @@ test('runs and sessions without a snapshot are never flagged', () => {
   assert.equal(sessionIntegrity(mkSession({ kind: 'run' }), program).ok, true);
   assert.equal(sessionIntegrity(mkSession({ kind: 'lift', prescriptionSnapshot: null }), program).ok, true);
 });
+
+test('a session logged under an older program version is not flagged when an exercise is swapped out', () => {
+  // The regression the v3 → v4 bump exists to prevent. Upper Pull used to
+  // carry a lat pulldown; it now carries a straight-arm pullover. Every pull
+  // session already in the log would read as "lat-pulldown is not part of
+  // lift:C" if sessionIntegrity judged it strictly against today's block list.
+  const snap = snapOf('lift:C');
+  const old = sessionFrom(snap, { programRef: { programId: program.programId, version: 3, dayKey: 'lift:C' } });
+  old.entries = [
+    ...old.entries.filter((e) => e.exerciseId !== 'straight-arm-pulldown'),
+    mkEntry('lat-pulldown', [mkSet({ weightKg: 65, reps: 12, rpe: 8 })]),
+  ];
+  old.prescriptionSnapshot = {
+    ...snap,
+    entries: [
+      ...snap.entries.filter((e) => e.exerciseId !== 'straight-arm-pulldown'),
+      { exerciseId: 'lat-pulldown', order: 2, plannedSets: [] },
+    ],
+  };
+  assert.equal(program.version, 4, 'the bump is what makes this work');
+  assert.deepEqual(sessionIntegrity(old, program).problems, []);
+
+  // A session claiming the CURRENT version with the same contents is still
+  // caught — leniency is scoped to "ran under a different version", not "old".
+  const current = { ...old, programRef: { ...old.programRef, version: program.version } };
+  const r = sessionIntegrity(current, program);
+  assert.equal(r.ok, false);
+  assert.match(r.problems.join(' '), /lat-pulldown is not part of lift:C/);
+});

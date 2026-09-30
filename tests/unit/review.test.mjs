@@ -116,7 +116,7 @@ test('the review tool reports on a real backup: every section, the rules that sh
 
   const md = runTool(['tools/review.mjs', file, '--stdout']).stdout;
 
-  for (const section of ['# Coaching review — 2026-10-26', '## Adherence', '## Main lifts', '### Incline Barbell Bench Press', '### Standing Barbell Overhead Press', '### Weighted Pull-Up', '## Accessories and legs', '## Running', '## Bodyweight', '## Recovery signals', '## Data quality', '## Rules that fired']) {
+  for (const section of ['# Coaching review — 2026-10-26', '## Adherence', '## Main lifts', '## Volume per muscle', '### Incline Barbell Bench Press', '### Standing Barbell Overhead Press', '### Weighted Pull-Up', '## Accessories and legs', '## Running', '## Bodyweight', '## Recovery signals', '## Data quality', '## Rules that fired']) {
     assert.ok(md.includes(section), `missing ${section}`);
   }
   assert.match(md, /Block \*\*\d, week \d of \d\*\*/);
@@ -274,4 +274,24 @@ test('the weekly rail is reported once per week, not once per run in it', () => 
   const md = reportFor([run2('2026-09-19', 5, 'long'), run2('2026-09-22', 5, 'easy'), run2('2026-09-26', 6, 'long')]);
   const weekly = [...md.matchAll(/This week would total/g)];
   assert.equal(weekly.length, 1, md.slice(md.indexOf('## Rules')));
+});
+
+test('the report counts direct sets per muscle, which is the log half of "what is lagging"', () => {
+  const { meta, sessions } = simulate();
+  const payload = buildBackup(meta, sessions, [], 'test');
+  payload.exportedAt = '2026-10-26T10:00:00.000Z';
+  const dir = tmp();
+  const file = path.join(dir, 'backup.json');
+  fs.writeFileSync(file, JSON.stringify(payload));
+  const md = runTool(['tools/review.mjs', file, '--stdout']).stdout;
+
+  const section = md.slice(md.indexOf('## Volume per muscle'), md.indexOf('## Running'));
+  assert.match(section, /\| Muscle \| Mean\/wk \| By week \| vs v3 target \|/);
+  // Side delts are trained twice a week in the fixture; the count must be real.
+  const sideDelts = section.match(/\| Side delts \| ([\d.]+) \|/);
+  assert.ok(sideDelts, section);
+  assert.ok(Number(sideDelts[1]) >= 6, `side delts ${sideDelts[1]}/wk looks wrong`);
+  assert.match(section, /in band \(8–10\)|under \(8–10\)|over \(8–10\)/);
+  // Weeks with no lifting must not be averaged in as zeros.
+  assert.match(section, /Weeks counted: \d+ of \d+/);
 });

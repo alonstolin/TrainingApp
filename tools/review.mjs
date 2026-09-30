@@ -21,9 +21,11 @@ import { deriveCursors, makeHistoryLookup } from '../src/core/schedule.js';
 import {
   blockReference, e1rm, effectiveLoad, formatPace, runLoadWarnings, loadFromReference,
 } from '../src/core/progression.js';
-import { coreAdherence, easyRunEffortByWeekday, weeklyRunVolume, runSeries } from '../src/core/stats.js';
+import {
+  coreAdherence, easyRunEffortByWeekday, weeklyRunVolume, runSeries, weeklyVolumeByMuscle,
+} from '../src/core/stats.js';
 import { startOfWeek, addDays, daysBetween, formatDuration, trainingDate } from '../src/core/dates.js';
-import { PROGRAMS, CURRENT_PROGRAM, getExercise, MAIN_LIFTS } from '../src/program/index.js';
+import { PROGRAMS, CURRENT_PROGRAM, getExercise, MAIN_LIFTS, MUSCLE_LABELS } from '../src/program/index.js';
 import { setIncrementOverrides } from '../src/program/exercises.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -369,6 +371,76 @@ for (const [, v] of [...byExercise.entries()].sort((a, b) => a[1].ex.name.locale
   ]);
 }
 table(['Exercise', 'Gym / station', 'Sessions', 'Last', 'Trend'], accRows);
+
+// ---------------------------------------------------------------------------
+// 4b. Volume per muscle
+// ---------------------------------------------------------------------------
+
+/**
+ * v3 weekly DIRECT-set targets (SYNTHESIS §2.1), the same bands the Progress
+ * screen fills its bars against. Flat across the block, not ramped.
+ */
+const VOLUME_TARGET = {
+  'side-delts': [8, 10],
+  'rear-delts': [6, 8],
+  triceps: [8, 10],
+  biceps: [8, 10],
+  chest: [3, 7],
+  'front-delts': [3, 7],
+  back: [7, 13],
+  quads: [3, 6],
+  hamstrings: [3, 4],
+  calves: [2, 4],
+  core: [6, 12],
+};
+
+h(2, 'Volume per muscle');
+p(
+  'Direct sets per week — one owner per set, the exercise\'s primary muscle. This is the LOG half of "what is lagging": ' +
+    'it says what was stimulated, not what that produced. A muscle inside its band and still visually behind is a different ' +
+    'problem from one below its band (SYNTHESIS §2.1).',
+);
+
+const volWeeks = [];
+for (let wk = startOfWeek(since); wk <= startOfWeek(today); wk = addDays(wk, 7)) {
+  volWeeks.push({ week: wk, rows: weeklyVolumeByMuscle(period, wk) });
+  if (volWeeks.length > 60) break;
+}
+const muscles = [...new Set(volWeeks.flatMap((w) => w.rows.map((r) => r.muscle)))];
+// Priority muscles first, then whatever else was trained.
+const PRIORITY = ['side-delts', 'rear-delts', 'triceps', 'biceps'];
+muscles.sort((a, b) => {
+  const ia = PRIORITY.indexOf(a);
+  const ib = PRIORITY.indexOf(b);
+  if (ia !== ib) return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+  return (MUSCLE_LABELS[a] ?? a).localeCompare(MUSCLE_LABELS[b] ?? b);
+});
+
+if (!muscles.length) p('_no completed lift sessions in the period_');
+else {
+  // Weeks with no lifting at all are dropped: a zero from a week off is not
+  // the same fact as a zero from skipping that muscle, and averaging them
+  // together understates every muscle equally.
+  const trained = volWeeks.filter((w) => w.rows.length);
+  const rows = muscles.map((m) => {
+    const perWeek = trained.map((w) => w.rows.find((r) => r.muscle === m)?.sets ?? 0);
+    const mean = perWeek.reduce((a, b) => a + b, 0) / (perWeek.length || 1);
+    const band = VOLUME_TARGET[m];
+    const verdict = !band
+      ? '—'
+      : mean < band[0] - 0.5
+        ? `**under** (${band[0]}–${band[1]})`
+        : mean > band[1] + 0.5
+          ? `over (${band[0]}–${band[1]})`
+          : `in band (${band[0]}–${band[1]})`;
+    if (band && mean < band[0] - 0.5 && PRIORITY.includes(m)) {
+      flagIt('volume', `${MUSCLE_LABELS[m] ?? m}: ${fmt(mean)} direct sets/week against a ${band[0]}–${band[1]} target — a priority muscle under its band (§2.1).`);
+    }
+    return [MUSCLE_LABELS[m] ?? m, fmt(mean), perWeek.join(' · '), verdict];
+  });
+  table(['Muscle', 'Mean/wk', 'By week', 'vs v3 target'], rows);
+  p(`Weeks counted: ${trained.length} of ${volWeeks.length} (weeks with no lifting are excluded).`);
+}
 
 // ---------------------------------------------------------------------------
 // 5. Running

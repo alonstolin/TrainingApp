@@ -151,8 +151,22 @@ export const EXERCISES = Object.fromEntries(
       muscle: 'back',
       trains: ['back', 'biceps'],
       equipment: 'cable',
-      alternatives: ['chin-up', 'cable-row'],
+      alternatives: ['straight-arm-pulldown', 'chin-up', 'cable-row'],
       cue: 'Full stretch at the top, no leaning back past ~15°.',
+    }),
+    def('straight-arm-pulldown', 'Straight-Arm Cable Pullover', {
+      short: 'SA Pullover',
+      muscle: 'back',
+      // Back only, deliberately. The triceps long head is a genuine synergist in
+      // shoulder extension, but `trains` answers "did I already hammer this
+      // yesterday" and feeds the adjacency invariant — tagging triceps here
+      // would collide with day D's overhead extensions over a contribution the
+      // research called modest and fractional. That credit belongs in the
+      // fractional-volume display, which is still deferred.
+      trains: ['back'],
+      equipment: 'cable',
+      alternatives: ['lat-pulldown', 'cable-row'],
+      cue: 'Elbows locked — shoulder extension only, not a press. The bent-arm dumbbell version is a chest exercise; this is not that.',
     }),
     def('reverse-pec-deck', 'Reverse Pec Deck', {
       short: 'Rev Pec Deck',

@@ -4,6 +4,7 @@ import {
   resolveLiftSession, resolveRunSession, resolveCoreSession, resolveSession, weekModifier, resolveBlock,
 } from '../../src/core/prescribe.js';
 import { impliedRpe, e1rm } from '../../src/core/progression.js';
+import { getExercise } from '../../src/program/exercises.js';
 import { program, v2, mkSet } from './_fixtures.mjs';
 
 const noHistory = () => null;
@@ -437,4 +438,36 @@ test('every programmed exercise exists in the catalog, and every alternative poi
   for (const ex of Object.values(EXERCISES)) {
     for (const alt of ex.alternatives) assert.ok(EXERCISES[alt], `${ex.id} lists unknown alternative ${alt}`);
   }
+});
+
+test('Upper Pull has exactly one vertical pull, and the pullover kept the slot it replaced', () => {
+  // Two vertical pulls on one day was the redundancy: EMG has pulldowns and
+  // pull-ups activating the lats about equally, so the second one bought
+  // elbow-flexor and trunk fatigue rather than lat stimulus
+  // (research/pull-day-vertical-redundancy.md).
+  const s = resolveLiftSession(program, 'lift:C', ctx());
+  const VERTICAL_PULLS = ['weighted-pullup', 'chin-up', 'lat-pulldown'];
+  const vertical = s.entries.filter((e) => VERTICAL_PULLS.includes(e.exerciseId));
+  assert.deepEqual(vertical.map((e) => e.exerciseId), ['weighted-pullup']);
+
+  const pullover = s.entries.find((e) => e.exerciseId === 'straight-arm-pulldown');
+  assert.ok(pullover, 'the slot is filled by the straight-arm pullover');
+  assert.equal(pullover.scheme, 'double_progression');
+  assert.equal(pullover.plannedSets.length, 3);
+  assert.deepEqual(
+    [pullover.plannedSets[0].targetRepMin, pullover.plannedSets[0].targetRepMax, pullover.plannedSets[0].rpeTarget],
+    [10, 12, 9],
+    'exactly one thing changed: the exercise, not the prescription',
+  );
+  // It is the straight-arm version specifically. A bent-arm dumbbell pullover
+  // is a pec and triceps exercise by EMG, which would be the wrong swap.
+  assert.match(getExercise('straight-arm-pulldown').cue, /Elbows locked/);
+  assert.equal(getExercise('straight-arm-pulldown').muscle, 'back');
+});
+
+test('the pullover does not put triceps on the pull day', () => {
+  // `trains` drives the adjacency invariant; day D does overhead extensions
+  // 48h later. The triceps-long-head contribution is real but fractional, and
+  // belongs in volume accounting rather than in fatigue scheduling.
+  assert.deepEqual(getExercise('straight-arm-pulldown').trains, ['back']);
 });
