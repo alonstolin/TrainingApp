@@ -74,7 +74,7 @@ if (spawnSync('ffmpeg', ['-version'], { stdio: 'ignore' }).error) {
 }
 
 const fps = Number(flags['--fps'] ?? 1);
-const height = Number(flags['--height'] ?? 900);
+const height = Number(flags['--height'] ?? 1568);
 if (!Number.isFinite(fps) || fps <= 0) die('--fps must be a positive number.');
 if (!Number.isFinite(height) || height < 200) die('--height must be at least 200.');
 
@@ -95,6 +95,12 @@ const run = (args) => execFileSync('ffmpeg', ['-hide_banner', '-loglevel', 'erro
 // ---- frames
 // -vf scale: -2 keeps the aspect ratio and an even width (h264 sources often
 // need it); q:v 3 is visually clean at a fraction of the size of q 1.
+//
+// 1568 is the long edge a vision model resizes to, so anything larger is
+// discarded on read and anything smaller is detail given away for nothing. It
+// matters more here than it sounds: a full-body frame 900px tall leaves the
+// torso about 250px wide, and a lat width difference worth acting on is a few
+// percent of that. The source is 4K; the ceiling is the only sensible default.
 run(['-i', file, '-vf', `fps=${fps},scale=-2:${height}`, '-q:v', '3', path.join(framesDir, 'frame-%03d.jpg')]);
 
 const frames = fs.readdirSync(framesDir).filter((f) => f.endsWith('.jpg')).sort();
