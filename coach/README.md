@@ -39,7 +39,8 @@ Weekly, alongside the training review — protocol in `coach/PHYSIQUE.md`:
 1. Twenty seconds of video, four poses, same spot and light every week; arm and
    calf measurements into `coach/data/physique/measurements.md`.
 2. `node tools/physique.mjs coach/data/physique/<date>.mov` (needs
-   `brew install ffmpeg`) → frames plus a numbered contact sheet.
+   `brew install ffmpeg`) → frames, a contact sheet and a `contact.txt` legend
+   mapping grid positions to filenames.
 3. The `physique-analyst` agent reads them against the latest review report and
    writes `research/physique-audit.md` for the specialists.
 

@@ -45,7 +45,9 @@ node tools/physique.mjs coach/data/physique/2026-10-05.mov
 ```
 
 That needs `brew install ffmpeg` once. It extracts a frame a second, writes a
-numbered contact sheet, and leaves everything in `coach/data/physique/<date>/`.
+contact sheet with a `contact.txt` legend, and leaves everything in
+`coach/data/physique/<date>/` — dated from the clip itself, so an iPhone name
+like `IMG_3699.MOV` still lands in the right folder.
 
 ## The tape — about two minutes
 

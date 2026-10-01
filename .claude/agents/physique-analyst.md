@@ -78,9 +78,12 @@ Your inputs, and their real weight:
 | Arm and calf tape (`coach/data/physique/measurements.md`) | The only numeric asymmetry signal that exists |
 | The review report (`coach/reports/`) | Direct sets per muscle per week, progression rate, stalls, adherence |
 
-Read `contact.jpg` first — it is a numbered montage of every frame — pick the
-squarest frames for each pose, then open only those at full size. Do not read
-two dozen stills one by one.
+Read `contact.jpg` first — a montage of every frame, row-major in filename
+order — pick the squarest frames for each pose, then open only those at full
+size. `contact.txt` beside it maps rows to filenames, since the tiles are not
+labelled (Homebrew's ffmpeg is built without the filter that would label them).
+Do not read two dozen stills one by one, and do not judge anything from a tile:
+they are thumbnails, for choosing only.
 
 ### "Lagging" is an intersection, and the disagreements are the point
 

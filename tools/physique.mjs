@@ -78,9 +78,15 @@ const height = Number(flags['--height'] ?? 900);
 if (!Number.isFinite(fps) || fps <= 0) die('--fps must be a positive number.');
 if (!Number.isFinite(height) || height < 200) die('--height must be at least 200.');
 
-// Default output is a folder named for the clip, beside it.
+// Output folder is named by DATE, because that is how the protocol refers to a
+// session and "IMG_3699" is not a date. A clip already named 2026-10-01.mov
+// keeps its name; anything else is dated from the file's own timestamp, which
+// for a phone clip is when it was recorded.
 const stem = path.basename(file).replace(/\.[^.]+$/, '');
-const outDir = path.resolve(flags['--out'] ?? path.join(path.dirname(file), stem));
+const isoDay = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const folder = /^\d{4}-\d{2}-\d{2}$/.test(stem) ? stem : isoDay(fs.statSync(file).mtime);
+const outDir = path.resolve(flags['--out'] ?? path.join(path.dirname(file), folder));
 const framesDir = path.join(outDir, 'frames');
 fs.mkdirSync(framesDir, { recursive: true });
 
@@ -97,26 +103,45 @@ if (!frames.length) {
   process.exit(1);
 }
 
-// ---- contact sheet, numbered so a frame can be named in the report
+// ---- contact sheet
+//
+// Deliberately NOT numbered in the image. Burning an index in needs ffmpeg's
+// drawtext, which needs freetype, which Homebrew's ffmpeg is built without —
+// and sending someone to a custom build for a frame number is a bad trade. The
+// legend below does the same job: the montage is strictly row-major in filename
+// order, so a position in the grid maps to a filename by arithmetic.
 const cols = Math.min(6, frames.length);
 const rows = Math.ceil(frames.length / cols);
 const contact = path.join(outDir, 'contact.jpg');
 run([
   '-i', path.join(framesDir, 'frame-%03d.jpg'),
-  '-vf',
-  [
-    'scale=-2:320',
-    // The index is burned in so the analyst can say "frame 7" and mean it.
-    `drawtext=text='%{eif\\\\:n+1\\\\:d}':x=6:y=6:fontsize=28:fontcolor=white:box=1:boxcolor=black@0.6:boxborderw=4`,
-    `tile=${cols}x${rows}:margin=6:padding=6:color=black`,
-  ].join(','),
+  '-vf', `scale=-2:320,tile=${cols}x${rows}:margin=6:padding=6:color=black`,
   '-frames:v', '1',
   '-q:v', '3',
   contact,
 ]);
 
+// The legend lives next to the sheet so whoever reads the folder — me, the
+// agent, or you in six months — can convert "second image on row three" into a
+// filename without counting tiles.
+const legend = [
+  `contact.jpg — ${frames.length} frames, ${cols} per row, row-major (left to right, top to bottom).`,
+  `Frames were taken at ${fps} fps, so each row covers about ${(cols / fps).toFixed(0)}s.`,
+  '',
+  ...Array.from({ length: rows }, (_, r) => {
+    const first = frames[r * cols];
+    const last = frames[Math.min((r + 1) * cols, frames.length) - 1];
+    return `  row ${r + 1}: ${first} … ${last}`;
+  }),
+  '',
+  'Open the individual files in frames/ for anything worth judging — the tiles',
+  'are thumbnails and will not support a call on symmetry.',
+].join('\n');
+fs.writeFileSync(path.join(outDir, 'contact.txt'), `${legend}\n`);
+
 const kb = (p) => `${Math.round(fs.statSync(p).size / 1024)} KB`;
 const rel = (p) => path.relative(ROOT, p);
 console.log(`${frames.length} frames at ${fps} fps → ${rel(framesDir)}/ (${kb(path.join(framesDir, frames[0]))} each)`);
-console.log(`contact sheet → ${rel(contact)} (${kb(contact)})`);
+console.log(`contact sheet → ${rel(contact)} (${kb(contact)}) · ${cols} per row, row-major`);
+console.log(`legend        → ${rel(path.join(outDir, 'contact.txt'))}`);
 console.log('\nRead the contact sheet first, pick the squarest frame for each pose, then open those individually.');
