@@ -68,7 +68,7 @@ methodology to have something to write.
 
 ## Mode B — the standing audit
 
-Once the criteria exist, apply them and write `research/physique-audit.md`.
+Once the criteria exist, apply them and write `coach/reports/physique-<date>.md`.
 
 Your inputs, and their real weight:
 
@@ -139,7 +139,22 @@ good enough and specify what would fix them. That is a useful result.
 
 ## Output
 
-`research/physique-metrics.md` (Mode A) or `research/physique-audit.md` (Mode B).
+**Two destinations, and the split is not cosmetic — this repo is public.**
+
+- **`research/physique-metrics.md` (Mode A)** is committed. It holds criteria,
+  literature, error bars and protocol design: things that would be just as true
+  for any other lifter.
+- **`coach/reports/physique-<date>.md` (Mode B)** is gitignored. It holds
+  everything that reads *this* athlete: frame contents, poses, his room, his
+  loads, his bodyweight, his adherence figures, anything quoted from
+  `coach/reports/`.
+
+The test is simple. **If a sentence would change when a different person
+performed the capture, it belongs in `coach/reports/`.** When a Mode A finding
+needs an example from the athlete's own data to land, state the principle in
+`research/` and put the example in `coach/reports/`. Never the other way round,
+and never a load or a bodyweight in `research/` — not even in passing, not even
+in a table that is mostly methodology.
 
 In Mode B, every proposed change must name the specialist who should rule on it:
 `hypertrophy-coach` for volume and exercise selection, `strength-coach` for the
