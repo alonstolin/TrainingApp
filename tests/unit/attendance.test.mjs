@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { attendanceLedger, shortfallByMuscle, weekPicture } from '../../src/core/attendance.js';
+import { attendanceLedger, shortfallByMuscle, weekPicture, blockShortfall } from '../../src/core/attendance.js';
 import { resolveLiftSession } from '../../src/core/prescribe.js';
 import { addDays } from '../../src/core/dates.js';
 import { mkSession, mkEntry, mkSet, program } from './_fixtures.mjs';
@@ -152,8 +152,10 @@ test('a week the range ends inside is marked partial: its unsettled days are not
   const weeks = ledgerOf(fullWeek(MON).slice(0, 1), MON, addDays(MON, 2));
   assert.equal(weeks.length, 1);
   assert.equal(weeks[0].partial, true);
+  assert.equal(weeks[0].open, 3, 'three template days not yet settled — neither done, skipped nor missed');
   assert.ok(weeks[0].muscles.every((m) => m.shortfall === 0));
   assert.equal(ledgerOf(fullWeek(MON))[0].partial, false);
+  assert.equal(ledgerOf(fullWeek(MON).slice(0, 3))[0].open, 0, 'a whole week has nothing open: the gap is a missed day');
 });
 
 test('a range that starts mid-week counts only what happened from its first day', () => {
@@ -258,4 +260,52 @@ test('the band follows the role the week\'s sessions ran under, even once the cu
   assert.equal(pic.role, 'deload');
   assert.deepEqual(muscleIn(pic, 'side-delts').band, { min: 4, max: 5 });
   assert.equal(muscleIn(pic, 'side-delts').short, false);
+});
+
+// ---- shortfall by block, for Progress (issue #6) ---------------------------
+// A block is [probe, …, test, deload]: it ends with its deload week.
+
+const weeksOf = (roles) => roles.flatMap((role, i) => fullWeek(addDays(MON, 7 * i), { role }));
+
+test('the current block is everything since the last deload; the previous block ends with it', () => {
+  const sessions = weeksOf(['probe', 'probe', 'test', 'deload', 'probe']);
+  const ledger = ledgerOf(sessions, MON, addDays(MON, 34));
+  const { current, previous } = blockShortfall(ledger);
+  assert.deepEqual(current.weeks.map((w) => w.weekStart), [addDays(MON, 28)]);
+  assert.deepEqual(previous.weeks.map((w) => w.role), ['probe', 'probe', 'test', 'deload']);
+});
+
+test('a skip is charged to the block it happened in, beside the other block for comparison', () => {
+  const sessions = weeksOf(['probe', 'probe', 'test', 'deload', 'probe']);
+  // Upper Push skipped in the previous block's first week.
+  sessions[1] = done('lift:A', addDays(MON, 2), { status: 'skipped' });
+  const { current, previous } = blockShortfall(ledgerOf(sessions, MON, addDays(MON, 34)));
+  assert.deepEqual(previous.shortfall.map((m) => [m.muscle, m.shortfall, m.reading]).find(([m]) => m === 'triceps'), ['triceps', 5, 'attendance']);
+  assert.deepEqual(current.shortfall, []);
+});
+
+test('the first block has nothing to compare against, and an empty log has an empty block', () => {
+  const first = blockShortfall(ledgerOf(weeksOf(['probe', 'probe']), MON, addDays(MON, 13)));
+  assert.equal(first.current.weeks.length, 2);
+  assert.equal(first.previous, null);
+  assert.deepEqual(blockShortfall([]), { current: { weeks: [], shortfall: [] }, previous: null });
+});
+
+test('two deload weeks in a row end one block, not two', () => {
+  // A down-week's long run skipped repeats the run week, and so the deload.
+  const sessions = weeksOf(['probe', 'test', 'deload', 'deload', 'probe']);
+  const { current, previous } = blockShortfall(ledgerOf(sessions, MON, addDays(MON, 34)));
+  assert.deepEqual(previous.weeks.map((w) => w.role), ['probe', 'test', 'deload', 'deload']);
+  assert.deepEqual(current.weeks.map((w) => w.role), ['probe']);
+});
+
+test('a catch-up week with more sessions than the template has nothing open or missed', () => {
+  // Behind, the athlete doubles up: five template lift days in one week.
+  const sessions = [...fullWeek(MON), done('lift:B', addDays(MON, 5))];
+  const [week] = ledgerOf(sessions);
+  assert.deepEqual(week.sessions, { done: 5, template: 4 });
+  assert.equal(week.open, 0);
+  assert.equal(week.missed, 0);
+  const [partial] = ledgerOf(sessions, MON, addDays(MON, 5));
+  assert.equal(partial.open, 0);
 });

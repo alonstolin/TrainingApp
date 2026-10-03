@@ -71,7 +71,7 @@ function lastVersion(sessions) {
  * Per muscle, `template` is the whole template week; `owed` is the part of it
  * the week settled, and the shortfall is owed minus performed.
  *
- * @returns {Array<{ weekStart, version, role, sessions:{done, template}, skipped:Array, missed,
+ * @returns {Array<{ weekStart, version, role, sessions:{done, template}, skipped:Array, missed, open,
  *   partial, attendanceComplete, muscles:Array<{muscle, label, template, owed, performed, shortfall}> }>}
  */
 export function attendanceLedger(sessions, { from, to, meta, programFor = getProgram }) {
@@ -111,6 +111,8 @@ export function attendanceLedger(sessions, { from, to, meta, programFor = getPro
     const partial = weekStart < from || addDays(weekStart, 6) > to;
     // Days still ahead of a partial week are not missed yet.
     const missed = partial ? 0 : Math.max(0, days.length - done - skipped.length);
+    // Template days neither done, skipped nor missed: not yet, or outside the range.
+    const open = Math.max(0, days.length - done - skipped.length - missed);
     const muscles = [...new Set([...template.keys(), ...performed.keys()])].map((muscle) => {
       const o = owed.get(muscle) ?? 0;
       const p = performed.get(muscle) ?? 0;
@@ -130,6 +132,7 @@ export function attendanceLedger(sessions, { from, to, meta, programFor = getPro
       sessions: { done, template: days.length },
       skipped,
       missed,
+      open,
       // The range opens or closes inside this week (the v3 entry week, the
       // current week): days outside it are neither done nor missed.
       partial,
@@ -217,4 +220,26 @@ export function weekPicture(state, program, { today = trainingDate() } = {}) {
     musclesShort: muscles.filter((m) => m.short).length,
     muscles,
   };
+}
+
+/**
+ * A ledger split into blocks, for Progress: the current block and the one
+ * before it, each with its weeks and its shortfall by muscle. A block is
+ * [probe, …, test, deload], so a new one starts with the first week that is
+ * not a deload after one that was — a repeated deload (a down-week's long run
+ * skipped, a break) stays in its block, and the v3 entry deload is a block of
+ * its own. The weeks' roles are the ledger's, so nothing here is a second
+ * calculation; on the lift-count clock a deload can straddle two calendar
+ * weeks, and the split is then as exact as the ledger's per-week role.
+ *
+ * @returns {{ current:{weeks, shortfall}, previous:{weeks, shortfall}|null }}
+ */
+export function blockShortfall(ledger) {
+  const blocks = [[]];
+  for (const [i, week] of ledger.entries()) {
+    if (i > 0 && ledger[i - 1].role === 'deload' && week.role !== 'deload') blocks.push([]);
+    blocks.at(-1).push(week);
+  }
+  const summarise = (weeks) => (weeks ? { weeks, shortfall: shortfallByMuscle(weeks) } : null);
+  return { current: summarise(blocks.at(-1)), previous: summarise(blocks.at(-2)) };
 }

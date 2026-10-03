@@ -4,6 +4,26 @@ Dated. Newest first. Each entry says what changed, what data or evidence it
 rested on, and where the detail lives. This is the memory of the program that
 survives any chat.
 
+## 2026-10-03 — Attendance on Progress: what a block is
+
+**What:** Progress gains an Attendance section (issue #6) that reads the same
+ledger as the review report, `attendanceLedger` then `shortfallByMuscle`, with
+no second calculation. It shows sessions per week, then the skip ledger, then
+shortfall by muscle for the current block beside the previous one.
+
+- A **block** is a run of ledger weeks ending in its deload. A new block starts
+  with the first week that is not a deload after one that was. A repeated
+  deload week (a down-week's long run skipped, or a break taken in a deload)
+  therefore stays in its block rather than becoming a one-week block of its
+  own. The v3 entry deload is a block by itself. The weeks' roles are the
+  ledger's. On the lift-count clock a deload can straddle two calendar weeks,
+  and the split is then only as exact as the ledger's per-week role.
+- The ledger runs from the v3 marker, as the report's does, so the two agree
+  on which weeks are partial.
+- Sessions per week and the skip ledger cover the same two blocks as the
+  shortfall, so the section reads as one comparison. The whole history since
+  v3 is the review report's.
+
 ## 2026-10-03 — Sets per muscle on Today: when a muscle reads as short
 
 **What:** Today shows the current week's direct sets per muscle, done plus

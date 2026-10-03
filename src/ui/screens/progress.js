@@ -11,7 +11,8 @@ import {
 } from '../../core/stats.js';
 import { corePhaseFor } from '../../core/prescribe.js';
 import { formatPace } from '../../core/progression.js';
-import { formatDate } from '../../core/dates.js';
+import { formatDate, formatRelativeDate, trainingDate } from '../../core/dates.js';
+import { attendanceLedger, blockShortfall } from '../../core/attendance.js';
 import { navigate } from '../../router.js';
 
 const LIFT_COLOR = {
@@ -27,6 +28,118 @@ function trendDelta(points) {
   if (!first) return null;
   const pct = ((last - first) / first) * 100;
   return { abs: last - first, pct };
+}
+
+const READING = {
+  attendance: 'in weeks with skips or misses',
+  volume: 'with full attendance',
+  mixed: 'attendance first, then volume',
+};
+
+/**
+ * Attendance: whether the athlete showed up, then what it cost — the same
+ * ledger the review report reads, split into the current and previous block.
+ * Missed days (still owed, cost no muscle) and skipped sessions (that day's
+ * sets are gone) are marked apart so the cause reads before the cost.
+ */
+function attendanceSection(state) {
+  const today = trainingDate();
+  // Since v3, exactly as the review report counts it (store.init always writes the marker).
+  const ledgerFrom = state.meta.v3StartedAt?.date ?? today;
+  const ledger = attendanceLedger(state.sessions, { from: ledgerFrom, to: today, meta: state.meta });
+  const { current, previous } = blockShortfall(ledger);
+  const weeks = [...(previous?.weeks ?? []), ...current.weeks];
+
+  // ---- 1. sessions per week, one mark per template day
+  const sessionRows = weeks.map((w) => {
+    const marks = [
+      ...Array(w.sessions.done).fill('done'),
+      ...Array(w.skipped.length).fill('skipped'),
+      ...Array(w.missed).fill('missed'),
+      ...Array(w.open).fill('open'),
+    ];
+    return el(
+      'div.attend-week',
+      null,
+      el('span.small', { text: `Week of ${formatDate(w.weekStart)}` }),
+      el('span.attend-marks', null, ...marks.map((m) => el('span.attend-mark', { dataset: { mark: m }, title: m }))),
+      el('span.num.dim.small', { text: `${w.sessions.done} of ${w.sessions.template}` }),
+      w.role === 'deload'
+        ? el('span.pill.pill--deload', { text: 'DELOAD' })
+        : // A partial week's open marks are days outside the ledger, not days owed.
+          el('span.xs.dim', { text: !w.partial ? '' : w.weekStart < ledgerFrom ? `v3 began ${formatDate(ledgerFrom)}` : 'in progress' }),
+    );
+  });
+
+  // ---- 2. the skip ledger, newest first
+  const skips = weeks.flatMap((w) => w.skipped).reverse();
+
+  // ---- 3. shortfall by muscle, this block beside the last
+  const byMuscle = new Map();
+  for (const [col, block] of [['current', current], ['previous', previous]]) {
+    for (const m of block?.shortfall ?? []) {
+      const row = byMuscle.get(m.muscle) ?? { label: m.label, current: null, previous: null };
+      row[col] = m;
+      byMuscle.set(m.muscle, row);
+    }
+  }
+  const cell = (m) => el('span.num.small', { text: m ? String(m.shortfall) : '0', class: m ? '' : 'dim' });
+
+  return el(
+    'section.stack-lg',
+    { dataset: { attendance: '' } },
+    el('div.section-label', { text: 'Attendance' }),
+    el(
+      'div.chart-card',
+      { dataset: { part: 'sessions' } },
+      el('div.chart-title', { text: 'Lift sessions per week' }),
+      el('p.xs.dim', {
+        style: { margin: '0.25rem 0 0.75rem' },
+        text: 'Against the template week. Filled: done. Struck: skipped — that day\'s sets are gone. Hollow: missed — still owed, so no muscle has lost it yet. Dashed: not yet, or before v3.',
+      }),
+      el('div.stack', { style: { gap: '0.4rem' } }, ...sessionRows),
+    ),
+    el(
+      'div.chart-card',
+      { dataset: { part: 'skips' } },
+      el('div.chart-title', { text: 'Skipped sessions' }),
+      skips.length
+        ? el(
+            'div.stack',
+            { style: { gap: '0.3rem', marginTop: '0.5rem' } },
+            ...skips.map((sk) =>
+              el('div.row-between.small', null, el('span', { text: sk.name }), el('span.dim', { text: formatRelativeDate(sk.date) })),
+            ),
+          )
+        : el('p.small.dim', { style: { marginTop: '0.4rem' }, text: 'No skipped sessions this block or last.' }),
+    ),
+    el(
+      'div.chart-card',
+      { dataset: { part: 'shortfall' } },
+      el('div.chart-title', { text: 'Shortfall by muscle' }),
+      el('p.xs.dim', {
+        style: { margin: '0.25rem 0 0.75rem' },
+        text: 'Direct sets the template week asked for and nobody did. Short with full attendance is the only case that argues for more volume.',
+      }),
+      byMuscle.size
+        ? el(
+            'div.stack',
+            { style: { gap: '0.4rem' } },
+            el('div.attend-short.xs.dim', null, el('span', { text: 'Muscle' }), el('span', { text: 'This block' }), el('span', { text: 'Last block' })),
+            ...[...byMuscle.values()].map((r) =>
+              el(
+                'div.attend-short',
+                null,
+                el('span.truncate.small', null, r.label, r.current ? el('span.xs.dim', { text: ` · ${READING[r.current.reading]}` }) : null),
+                cell(r.current),
+                previous ? cell(r.previous) : el('span.dim.small', { text: '—' }),
+              ),
+            ),
+          )
+        : el('p.small.dim', { text: 'No muscle short this block or last.' }),
+      previous ? null : el('p.xs.dim', { style: { marginTop: '0.5rem' }, text: 'First block — nothing to compare against yet.' }),
+    ),
+  );
 }
 
 function liftsTab(sessions) {
@@ -364,7 +477,11 @@ export default function mountProgress(root) {
       tabs.appendChild(b);
     }
 
-    append(screen, [el('header.page-head', null, el('h1.page-title', { text: 'Progress' })), tabs]);
+    append(screen, [
+      el('header.page-head', null, el('h1.page-title', { text: 'Progress' })),
+      el('div', { style: { marginBottom: '1.5rem' } }, attendanceSection(store.getState())),
+      tabs,
+    ]);
     screen.appendChild(tab === 'lifts' ? liftsTab(sessions) : tab === 'running' ? runningTab(sessions) : coreTab(sessions));
     void MUSCLE_LABELS;
   };
