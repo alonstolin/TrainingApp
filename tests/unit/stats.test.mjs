@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   coreAdherence, easyRunEffortByWeekday,
   e1rmSeries, runSeries, weeklyRunVolume, coreSeries,
-  weeklyVolumeByMuscle, personalBests, runMilestones, topSetSeries, easyPaceSecPerKm,
+  weeklyVolumeByMuscle, personalBests, runMilestones, topSetSeries, easyPaceSecPerKm, estimated1rmSeries,
 } from '../../src/core/stats.js';
 import { mkSession, mkEntry, mkSet, program } from './_fixtures.mjs';
 
@@ -166,4 +166,77 @@ test('easy pace is the median of the easy runs in the last 28 days', () => {
   ];
   assert.equal(easyPaceSecPerKm(sessions, today), 390);
   assert.equal(easyPaceSecPerKm(sessions.slice(3), today), null, 'no recent easy run, no pace');
+});
+
+// ---- estimated 1RM from probes (issue #7) ----------------------------------
+// Epley with RIR: e1RM = load × (1 + (reps + 10 − RPE) / 30).
+
+const probeDay = (date, block, exerciseId, sets, bodyweightKg = 80, role = 'probe') =>
+  mkSession({
+    date, bodyweightKg,
+    programRef: { programId: 'x', version: 5, mesocycle: block, role },
+    entries: [mkEntry(exerciseId, sets.map((s) => mkSet(s)))],
+  });
+
+test('estimated 1RM comes from probe sets only — back-offs and volume days never contribute', () => {
+  const sessions = [
+    // Probe 100 × 3 @ 8 → 100 × (1 + 5/30) = 116.7. The back-off 90 × 6 @ 10 (= 108)
+    // and a warm-up are ignored even where they would not change the answer…
+    probeDay('2026-10-05', 1, 'incline-bench', [
+      { type: 'warmup', weightKg: 60, reps: 5 },
+      { type: 'probe', weightKg: 100, reps: 3, rpe: 8 },
+      { type: 'backoff', weightKg: 90, reps: 6, rpe: 10 },
+    ]),
+    // …and a volume day with a higher estimate (90 × 10 @ 9 → 123) adds no point.
+    probeDay('2026-10-07', 1, 'incline-bench', [{ type: 'work', weightKg: 90, reps: 10, rpe: 9 }]),
+  ];
+  const s = estimated1rmSeries(sessions, 'incline-bench');
+  assert.deepEqual(s.points.map((p) => [p.date, p.value]), [['2026-10-05', 116.7]]);
+});
+
+test('each block counts its best probe, the all-time best is marked, and the line can fall', () => {
+  const probe = (date, block, weightKg, reps, rpe) => probeDay(date, block, 'incline-bench', [{ type: 'probe', weightKg, reps, rpe }]);
+  const sessions = [
+    probe('2026-10-05', 1, 100, 3, 8), // 116.7
+    probe('2026-10-12', 1, 100, 4, 8), // 120   ← block 1's best, and the best ever
+    probe('2026-11-02', 2, 95, 3, 8), //  110.8
+    probe('2026-11-09', 2, 100, 2, 8), // 113.3 ← block 2's best: lower than block 1's
+  ];
+  const s = estimated1rmSeries(sessions, 'incline-bench');
+  assert.equal(s.points.length, 4, 'one point per probe');
+  assert.deepEqual(s.blockBests.map((p) => [p.block, p.date, p.value]), [[1, '2026-10-12', 120], [2, '2026-11-09', 113.3]]);
+  assert.deepEqual([s.best.date, s.best.value], ['2026-10-12', 120]);
+  assert.ok(s.blockBests[1].value < s.blockBests[0].value, 'unlike the block reference, the estimate falls');
+});
+
+test('the pull-up reads as belt load at today\'s bodyweight; system mass does not move with it', () => {
+  // At 80 kg, +20 × 3 @ 8 → system mass 100 × (1 + 5/30) = 116.7.
+  const sessions = [probeDay('2026-10-09', 1, 'weighted-pullup', [{ type: 'probe', weightKg: 20, reps: 3, rpe: 8 }], 80)];
+  const at80 = estimated1rmSeries(sessions, 'weighted-pullup', { bodyweightKg: 80 }).best;
+  const at85 = estimated1rmSeries(sessions, 'weighted-pullup', { bodyweightKg: 85 }).best;
+  assert.deepEqual([at80.systemKg, at80.value], [116.7, 36.7]);
+  assert.deepEqual([at85.systemKg, at85.value], [116.7, 31.7], 'five kilos heavier, five fewer on the belt');
+});
+
+test('with no bodyweight given, every pull-up point is read at the latest logged bodyweight', () => {
+  // The same system mass lifted at 80 kg and then at 85 kg is the same strength:
+  // it must not read as five kilos lost off the belt.
+  const sessions = [
+    probeDay('2026-10-09', 1, 'weighted-pullup', [{ type: 'probe', weightKg: 20, reps: 3, rpe: 8 }], 80),
+    probeDay('2026-11-06', 2, 'weighted-pullup', [{ type: 'probe', weightKg: 15, reps: 3, rpe: 8 }], 85),
+  ];
+  const s = estimated1rmSeries(sessions, 'weighted-pullup');
+  assert.deepEqual(s.blockBests.map((p) => [p.systemKg, p.value]), [[116.7, 31.7], [116.7, 31.7]]);
+});
+
+test('a block number the engine hands out twice is still two blocks, and the entry deload is its own', () => {
+  const probe = (date, block, weightKg, role) => probeDay(date, block, 'incline-bench', [{ type: 'probe', weightKg, reps: 3, rpe: 8 }], 80, role);
+  const sessions = [
+    probe('2026-09-14', 1, 90, 'deload'), // the v3 entry deload records block 1…
+    probe('2026-09-21', 1, 100, 'probe'), // …and so does the first real block
+    probe('2026-10-19', 2, 105, 'probe'),
+    probe('2026-11-16', 1, 95, 'probe'), //  a fallback period that numbered itself 1 again
+  ];
+  const s = estimated1rmSeries(sessions, 'incline-bench');
+  assert.deepEqual(s.blockBests.map((p) => p.date), ['2026-09-14', '2026-09-21', '2026-10-19', '2026-11-16']);
 });

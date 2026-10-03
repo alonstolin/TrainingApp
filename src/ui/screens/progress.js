@@ -1,18 +1,20 @@
 /** Progress — lifts, running and core. */
 
-import { el, onTap, append } from '../dom.js';
+import { el, onTap, append, fmtKg, fmtWeight } from '../dom.js';
 import { lineChart, barChart, smallMultiples } from '../chart.js';
 import * as store from '../../data/store.js';
 import { MAIN_LIFTS, getExercise, MUSCLE_LABELS } from '../../program/exercises.js';
 import { CURRENT_PROGRAM } from '../../program/index.js';
 import {
-  e1rmSeries, topSetSeries, runSeries, weeklyRunVolume, coreSeries,
+  e1rmSeries, topSetSeries, runSeries, weeklyRunVolume, coreSeries, estimated1rmSeries,
   runMilestones, coreAdherence, easyRunEffortByWeekday,
 } from '../../core/stats.js';
 import { corePhaseFor } from '../../core/prescribe.js';
 import { formatPace } from '../../core/progression.js';
 import { formatDate, formatRelativeDate, trainingDate } from '../../core/dates.js';
 import { attendanceLedger, blockShortfall } from '../../core/attendance.js';
+import { projectGoalDate } from '../../core/calendar.js';
+import { longestRecentRunKm } from '../../core/schedule.js';
 import { navigate } from '../../router.js';
 
 const LIFT_COLOR = {
@@ -28,6 +30,99 @@ function trendDelta(points) {
   if (!first) return null;
   const pct = ((last - first) / first) * 100;
   return { abs: last - first, pct };
+}
+
+/** How far back the 10K card looks for the longest run: 28 days, today included. */
+const TEN_K_WINDOW_DAYS = 28;
+
+/**
+ * A goal lift's headline: the estimated 1RM, one point per block (its best
+ * probe), the all-time best ringed. The pull-up reads as belt load at today's
+ * bodyweight, with bodyweight + belt underneath, so a bodyweight change cannot
+ * pass for a strength change; with no bodyweight anywhere it reads on system
+ * mass and says so.
+ */
+function liftHeadline(state, id) {
+  const ex = getExercise(id);
+  const series = estimated1rmSeries(state.sessions, id, { bodyweightKg: state.meta.bodyweightKg ?? null });
+  const card = el('div.chart-card', { dataset: { goal: id } }, el('div.eyebrow', { text: ex.name }));
+  if (!series.blockBests.length) {
+    card.appendChild(el('p.small.dim', { style: { marginTop: '0.4rem' }, text: 'No probes yet — the first heavy day\'s probe starts this line.' }));
+    return card;
+  }
+  const latest = series.blockBests.at(-1);
+  const { best } = series;
+  // The belt reading exists only for a belt-loaded lift with a bodyweight to subtract.
+  const onBelt = ex.loadModel === 'bodyweight_plus' && latest.value != null;
+  const reading = (p) => (onBelt ? `+${fmtKg(p.value)}` : fmtKg(p.systemKg));
+  append(card, [
+    el(
+      'div.row-between',
+      { style: { alignItems: 'baseline', margin: '0.3rem 0 0.2rem' } },
+      el('div.hero-title.num', { text: reading(latest) }),
+      el('span.small.dim', { text: latest.systemKg >= best.systemKg ? 'best yet' : `best ${reading(best)}` }),
+    ),
+    el('p.xs.dim', {
+      text:
+        ex.loadModel !== 'bodyweight_plus'
+          ? 'Estimated 1RM · this block\'s best probe'
+          : onBelt
+            ? `Belt load at today's bodyweight · ${fmtKg(latest.systemKg)} bodyweight + belt`
+            : 'Bodyweight + belt — set your bodyweight to read it as belt load',
+    }),
+    lineChart({
+      points: series.blockBests.map((p) => ({ ...p, value: onBelt ? p.value : p.systemKg, detail: p.block != null ? `block ${p.block}` : '' })),
+      color: LIFT_COLOR[id],
+      unit: 'kg',
+      height: 110,
+      highlight: series.blockBests.indexOf(best),
+      caption: 'One point per block, its best probe; the ring is the best ever.',
+    }),
+  ]);
+  return card;
+}
+
+/**
+ * The 10K headline: the longest run in the last 28 days against the goal
+ * distance, and the date the goal-date projection lands it. Done means the
+ * plan's goal week is banked, not merely that some run reached 10 km.
+ */
+function tenKHeadline(state) {
+  const goalKm = CURRENT_PROGRAM.runPlan.find((w) => w.goal)?.long.km ?? CURRENT_PROGRAM.runPlan.at(-1).long.km;
+  // longestRecentRunKm counts `days` back from today inclusive, so 27 is a 28-day window.
+  const longest = longestRecentRunKm(state.sessions, trainingDate(), TEN_K_WINDOW_DAYS - 1);
+  const projection = projectGoalDate(state, CURRENT_PROGRAM);
+  const banked = store.cursors().run.longCompleted >= CURRENT_PROGRAM.runPlan.length;
+  return el(
+    'div.chart-card',
+    { dataset: { goal: '10k' } },
+    el('div.eyebrow', { text: '10K' }),
+    el(
+      'div.row-between',
+      { style: { alignItems: 'baseline', margin: '0.3rem 0 0.5rem' } },
+      el('div.hero-title.num', { text: `${fmtWeight(longest)} km` }),
+      el('span.small.dim', { text: `of ${goalKm} km · longest in ${TEN_K_WINDOW_DAYS} days` }),
+    ),
+    el('div.weekbar-track', null, el('span.weekbar-done', { style: { width: `${Math.min(100, (longest / goalKm) * 100)}%` } })),
+    el('p.small.muted', {
+      style: { marginTop: '0.6rem' },
+      text: banked
+        ? 'The goal week is banked — the plan now holds at maintenance.'
+        : projection
+          ? `Projected: ${formatRelativeDate(projection.date)} · ${projection.weeksAway} week${projection.weeksAway === 1 ? '' : 's'} away if the plan holds`
+          : 'No projected date yet.',
+    }),
+  );
+}
+
+function headlines(state) {
+  return el(
+    'section.stack',
+    { dataset: { headlines: '' } },
+    ...MAIN_LIFTS.map((id) => liftHeadline(state, id)),
+    tenKHeadline(state),
+    el('p.xs.dim', { text: 'A probe logged without RPE counts as taken to failure, so its estimate reads low.' }),
+  );
 }
 
 const READING = {
@@ -477,12 +572,19 @@ export default function mountProgress(root) {
       tabs.appendChild(b);
     }
 
+    const state = store.getState();
     append(screen, [
       el('header.page-head', null, el('h1.page-title', { text: 'Progress' })),
-      el('div', { style: { marginBottom: '1.5rem' } }, attendanceSection(store.getState())),
-      tabs,
+      el('div', { style: { marginBottom: '1.5rem' } }, headlines(state)),
+      el('div', { style: { marginBottom: '1.5rem' } }, attendanceSection(state)),
+      el(
+        'section',
+        { dataset: { details: '' } },
+        el('div.section-label', { text: 'Details', style: { marginBottom: '0.75rem' } }),
+        tabs,
+        tab === 'lifts' ? liftsTab(sessions) : tab === 'running' ? runningTab(sessions) : coreTab(sessions),
+      ),
     ]);
-    screen.appendChild(tab === 'lifts' ? liftsTab(sessions) : tab === 'running' ? runningTab(sessions) : coreTab(sessions));
     void MUSCLE_LABELS;
   };
 

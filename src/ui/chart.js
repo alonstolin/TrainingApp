@@ -55,7 +55,8 @@ function niceDomain(values, { zeroBase = false } = {}) {
 
 /**
  * Line chart.
- * @param {object} o points:[{date,value,...}], color, height, unit, formatValue, zeroBase
+ * @param {object} o points:[{date,value,...}], color, height, unit, formatValue, zeroBase,
+ *                   highlight (index of a point to ring, e.g. the all-time best)
  */
 export function lineChart(o) {
   const {
@@ -66,6 +67,7 @@ export function lineChart(o) {
     formatValue = (v) => String(Math.round(v * 10) / 10),
     zeroBase = false,
     caption,
+    highlight = null,
   } = o;
 
   if (!points || points.length === 0) {
@@ -119,6 +121,11 @@ export function lineChart(o) {
 
   for (let i = 0; i < points.length; i++) {
     svg.appendChild(svgEl('circle', { cx: x(i), cy: y(points[i].value), r: 2.5, fill: color }));
+  }
+  if (highlight != null && points[highlight]) {
+    svg.appendChild(svgEl('circle', {
+      cx: x(highlight), cy: y(points[highlight].value), r: 5, fill: 'none', stroke: color, 'stroke-width': 1.5,
+    }));
   }
 
   const marker = svgEl('circle', { r: 5, fill: color, stroke: 'var(--bg)', 'stroke-width': 2, opacity: 0 });

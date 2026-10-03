@@ -57,6 +57,63 @@ export function e1rmSeries(sessions, exerciseId, opts = {}) {
   return out;
 }
 
+/**
+ * The estimated 1RM a goal lift's probes show (the glossary's "estimated
+ * 1RM"): one point per probe set, never a back-off or a volume day, through
+ * the engine's own e1RM formula, which reads RPE when it is logged. Unlike the
+ * block reference this can fall, so a bad month shows.
+ *
+ * A probe's block is the one its session recorded (`programRef.mesocycle` —
+ * the "Block N" Today showed when it was lifted). The engine can hand a number
+ * out twice (the entry deload and the first block are both 1, and a lift-count
+ * fallback can renumber), so a new block starts whenever the recorded number
+ * changes or a deload ends, as blockShortfall() splits the ledger. Each block's
+ * best probe is the point that counts for it; `best` is the all-time best.
+ *
+ * Every point carries `systemKg`, the estimate on what was actually moved. For
+ * the weighted pull-up that is bodyweight + belt, and `value` is the belt load
+ * it implies at one current bodyweight — `bodyweightKg`, else the latest one
+ * logged — so a bodyweight change cannot pass for a strength change. With no
+ * bodyweight anywhere it is null. For every other lift `value` is `systemKg`.
+ *
+ * @returns {{ points:Array<{date, block, value, systemKg, sessionId}>, blockBests:Array, best:object|null }}
+ */
+export function estimated1rmSeries(sessions, exerciseId, { bodyweightKg = null } = {}) {
+  const ex = getExercise(exerciseId);
+  const isBeltLoaded = ex.loadModel === 'bodyweight_plus';
+  const currentBw = bodyweightKg ?? completed(sessions).findLast((s) => s.bodyweightKg != null)?.bodyweightKg ?? null;
+  const round = (v) => Math.round(v * 10) / 10;
+  const valueOf = (system) => (!isBeltLoaded ? round(system) : currentBw != null ? round(system - currentBw) : null);
+  const points = [];
+  for (const s of completed(sessions)) {
+    for (const entry of s.entries ?? []) {
+      if (entry.exerciseId !== exerciseId) continue;
+      for (const set of entry.sets ?? []) {
+        if (!set.done || set.type !== 'probe' || !set.reps) continue;
+        const system = e1rm(effectiveLoad(set, ex, s.bodyweightKg), set.reps, set.rpe);
+        points.push({
+          date: s.date,
+          block: s.programRef?.mesocycle ?? null,
+          role: s.programRef?.role ?? null,
+          value: valueOf(system),
+          systemKg: round(system),
+          sessionId: s.id,
+        });
+      }
+    }
+  }
+  // Ranked on system mass: it orders the same as the belt load, and exists even without a bodyweight.
+  const blockBests = [];
+  for (const [i, p] of points.entries()) {
+    const prev = points[i - 1];
+    const newBlock = !prev || p.block !== prev.block || (prev.role === 'deload' && p.role !== 'deload');
+    if (newBlock) blockBests.push(p);
+    else if (p.systemKg > blockBests.at(-1).systemKg) blockBests[blockBests.length - 1] = p;
+  }
+  const best = blockBests.reduce((a, p) => (!a || p.systemKg > a.systemKg ? p : a), null);
+  return { points, blockBests, best };
+}
+
 /** Heaviest working weight actually lifted per session — the number you feel. */
 export function topSetSeries(sessions, exerciseId, opts = {}) {
   const out = [];

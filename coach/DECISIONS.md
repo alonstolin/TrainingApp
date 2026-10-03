@@ -4,6 +4,33 @@ Dated. Newest first. Each entry says what changed, what data or evidence it
 rested on, and where the detail lives. This is the memory of the program that
 survives any chat.
 
+## 2026-10-03 — Goal headlines: how the estimated 1RM is read
+
+**What:** Progress now opens on the two goals (issue #7). The order is the
+three goal-lift cards and the 10K, then Attendance, then everything that was
+already there, under Details.
+
+- The **estimated 1RM** comes from **probe sets only**, through the engine's
+  own e1RM formula. Back-offs and volume days never count. It is kept apart
+  from the block reference, which only rises, so it can fall and a bad month
+  shows.
+- Each **block's best probe** is that block's point, and the all-time best is
+  ringed. A probe's block is the one its session recorded. Because the engine
+  can issue the same number twice, a new block starts whenever that number
+  changes or a deload ends. That covers the entry deload and the first block
+  (both "1"), and a lift-count fallback that renumbers.
+- The **weighted pull-up** is computed on system mass and shown as **belt load
+  at one current bodyweight**: the bodyweight in Settings, else the latest one
+  logged. Every point uses the same bodyweight, so a bodyweight change cannot
+  pass for a strength change.
+- The **10K card** shows the longest completed run in the last 28 days, today
+  included, against the goal distance, and the date from the goal-date
+  projection. It reads as done only once the plan's goal week is banked. A
+  single 10 km easy run does not count.
+- Accepted, not fixed: until RPE is logged on probes, a probe without RPE is
+  read as taken to failure, so estimates read low. The card says so in one
+  line.
+
 ## 2026-10-03 — Attendance on Progress: what a block is
 
 **What:** Progress gains an Attendance section (issue #6) that reads the same
