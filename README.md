@@ -124,7 +124,10 @@ The current basis is [research/SYNTHESIS.md](research/SYNTHESIS.md), with the fo
 
 Shows the plan against real dates: the fixed weekly rhythm, a month grid, and the
 coming week spelled out. Tapping any day gives the detail — for a future lift day,
-the actual movements and rep schemes you'll be walking into.
+the actual movements and rep schemes you'll be walking into (never weights: it is
+a forecast, not a prescription); for a future run day, its target and the saved
+routes that fit it. A route is only ever suggested: nothing is attached to a
+planned day, so a run that slips to another day strands nothing.
 
 The important distinction, and the reason this screen needed care: **past days are
 facts, future days are forecasts.** Because the program is cursor-driven (below),
@@ -135,6 +138,24 @@ which is correct behaviour rather than drift, so the screen says so rather than
 implying Wednesday is a commitment.
 
 It also projects your 10K date from your current position in the run plan.
+
+## Today and Progress
+
+**Today** leads with what to do now. Directly below it, one collapsed line —
+*This week: 2 of 4 sessions · 2 muscles short* — opens into direct sets per
+muscle: done, plus still ahead as the calendar projects the rest of the week,
+against the program's band. A muscle reads short only when the rest of the week
+cannot reach its band, so Monday flags nothing; a deload halves the band.
+
+**Progress** opens on the two goals: the estimated 1RM of each goal lift, from
+probe sets only, one point per block with the best ever ringed (the pull-up as
+belt load at today's bodyweight), and the 10K — longest run in 28 days against
+10 km, and the projected date. Then **Attendance**: lift sessions per week
+against the template week, the skipped sessions, and shortfall by muscle for
+this block beside the last. A *missed* day is still owed and costs no muscle; a
+*skipped* session's sets are gone. Short with full attendance is the only case
+that argues for more volume. Everything else — every chart, every exercise —
+is under **Details**.
 
 ## How the schedule works
 
@@ -235,7 +256,8 @@ Independently of that, tapping the number on any stepper opens a keypad that tak
 
 ## Routes on a real map
 
-**Routes** (from a run's route card, or Progress → Running) plans a run on a
+**Routes** (from Today's run card, a run day in the Calendar, or the run
+screen's route card) plans a run on a
 map: tap the corners of the streets you will run and the distance adds up live
 at the top, next to the rung the plan wants next. Start from your current
 location or from the first tap; drag a corner to move it, tap one to remove it;
@@ -264,7 +286,9 @@ phone into `coach/data/backups/`, then `npm run review -- <file>` (or `/review`
 in Claude Code) writes a Markdown report to `coach/reports/`: adherence, the
 block reference after every heavy session, accessory stalls per gym and
 station, every run against the spike and weekly rails, CR10 and talk test by
-weekday, bodyweight drift, the reactive-deload conditions — and the program's
+weekday, bodyweight drift, the reactive-deload conditions, shortfall since v3
+(sessions per week, then skips, then shortfall by muscle — the same ledger
+Progress reads) — and the program's
 own rules applied to them mechanically. Every number comes from the same
 `src/core/` modules the app runs. `coach/DECISIONS.md` is the dated record of
 what was changed and why. Training data and reports are gitignored; the repo
