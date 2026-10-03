@@ -101,11 +101,16 @@ export function buildCalendar(state, program, range) {
   );
 
   const days = [];
-  const span = daysBetween(from, to);
-  if (span < 0) return days;
+  if (daysBetween(from, to) < 0) return days;
+  // The forecast is a forward simulation from today, so a range that opens in
+  // the future (next month in the Calendar) still walks every day from today
+  // and only returns the ones asked for — or it would forget the sessions in
+  // between and project next month's first long run as week 1 again.
+  const start = from < today ? from : today;
+  const span = daysBetween(start, to);
 
   for (let i = 0; i <= Math.min(span, 800); i++) {
-    const date = addDays(from, i);
+    const date = addDays(start, i);
     const dow = dayOfWeek(date);
     const slots = (program.weekTemplate[dow] ?? []).filter((s) => includeOptional || !s.optional);
     const actual = byDate.get(date) ?? [];
@@ -191,6 +196,7 @@ export function buildCalendar(state, program, range) {
             status: 'projected', track, key: slot.key, optional: true,
             name: label.name, short: label.short, detail: restDefault ? 'rest by default' : label.focus, projected: true,
             restByDefault: restDefault,
+            ...(track === 'run' ? { runWeek } : {}),
           });
           continue;
         }
@@ -230,6 +236,7 @@ export function buildCalendar(state, program, range) {
       }
     }
 
+    if (date < from) continue;
     days.push({
       date,
       dow,

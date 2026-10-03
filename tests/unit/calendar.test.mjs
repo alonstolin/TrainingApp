@@ -232,3 +232,24 @@ test('the bonus day disappears from the projection outside probe weeks, and test
   assert.ok(!testThu.entries.some((e) => e.key === 'lift:E'), 'no bonus day in the test week');
   assert.ok(testThu.entries.some((e) => e.restByDefault), 'the optional run reads as rest by default');
 });
+
+test('a range that starts in the future still projects from today: next month is not week 1 again', () => {
+  // Viewing November from 3 October. Five Saturdays' long runs lie between.
+  const state = { sessions: [], meta: {} };
+  const whole = buildCalendar(state, program, { from: '2026-10-03', to: '2026-11-07', today: '2026-10-03' });
+  const nextMonth = buildCalendar(state, program, { from: '2026-11-01', to: '2026-11-07', today: '2026-10-03' });
+  assert.equal(nextMonth[0].date, '2026-11-01', 'only the requested days come back');
+  assert.equal(nextMonth.length, 7);
+  const longRun = (days) => days.at(-1).entries.find((e) => e.key === 'run:long');
+  assert.equal(longRun(nextMonth).runWeek, longRun(whole).runWeek);
+  assert.equal(longRun(nextMonth).runWeek, 6);
+});
+
+test('an optional run slot carries its run week, so its preview shows the right target', () => {
+  // Thursday 1 Oct 2026, run week 1 from a fresh log: the optional easy run is week 1's.
+  const days = buildCalendar({ sessions: [], meta: {} }, program, { from: '2026-09-28', to: '2026-10-04', today: '2026-09-28' });
+  const thursday = days.find((d) => d.date === '2026-10-01');
+  const easy = thursday.entries.find((e) => e.key === 'run:easy');
+  assert.equal(easy.optional, true);
+  assert.equal(easy.runWeek, 1);
+});
