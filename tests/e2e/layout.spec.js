@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { boot, acceptBodyweight, startLift } from './_helpers.js';
+import { boot, acceptBodyweight, startLift, fixDay } from './_helpers.js';
 
 /**
  * Nothing the session needs may sit under the fixed bars.
@@ -86,4 +86,22 @@ test('a long day scrolls to its last exercise without the tab bar eating it', as
   const tabbar = await boxOf(page, '#tabbar');
   expect(chrome).toBeCloseTo(rest.height + tabbar.height, 0);
   expect(rest.y + rest.height).toBeLessThanOrEqual(tabbar.y + 1);
+});
+
+test('Today\'s expanded week panel scrolls clear of the bottom chrome', async ({ page }) => {
+  await fixDay(page); // Monday: the panel sits under a lift hero, not a rest card
+  await boot(page);
+  const line = page.locator('[data-week-line]');
+  await line.locator('summary').click();
+  // The footnote is the panel's last element.
+  const last = line.locator('p').last();
+  await expect(last).toBeVisible();
+  await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+  await expect
+    .poll(async () => {
+      const chrome = await page.evaluate(() => parseFloat(getComputedStyle(document.body).getPropertyValue('--bottom-chrome')));
+      const box = await last.boundingBox();
+      return box.y + box.height <= page.viewportSize().height - chrome + 1;
+    })
+    .toBe(true);
 });

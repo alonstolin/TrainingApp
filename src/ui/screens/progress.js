@@ -7,11 +7,11 @@ import { MAIN_LIFTS, getExercise, MUSCLE_LABELS } from '../../program/exercises.
 import { CURRENT_PROGRAM } from '../../program/index.js';
 import {
   e1rmSeries, topSetSeries, runSeries, weeklyRunVolume, coreSeries,
-  weeklyVolumeByMuscle, runMilestones, coreAdherence, easyRunEffortByWeekday, targetBand,
+  runMilestones, coreAdherence, easyRunEffortByWeekday,
 } from '../../core/stats.js';
 import { corePhaseFor } from '../../core/prescribe.js';
 import { formatPace } from '../../core/progression.js';
-import { startOfWeek, trainingDate, formatDate } from '../../core/dates.js';
+import { formatDate } from '../../core/dates.js';
 import { navigate } from '../../router.js';
 
 const LIFT_COLOR = {
@@ -113,34 +113,6 @@ function liftsTab(sessions) {
       chartHost,
     ),
   ]);
-
-  // ---- weekly volume vs the program's direct-set bands (SYNTHESIS §2.1):
-  // `min` is the low edge of the band; `max` fills the bar.
-  const thisWeek = startOfWeek(trainingDate());
-  const vol = weeklyVolumeByMuscle(sessions, thisWeek);
-  if (vol.length) {
-    const rows = vol.map((v) => {
-      const band = targetBand(CURRENT_PROGRAM, v.muscle);
-      const pct = band ? Math.min(100, (v.sets / band.max) * 100) : Math.min(100, v.sets * 5);
-      const under = band && v.sets < band.min;
-      return el(
-        'div.volbar',
-        null,
-        el('span.truncate', { text: v.label }),
-        el('div.volbar-track', null, el('div.volbar-fill', { style: { width: `${pct}%`, background: under ? 'var(--warn)' : 'var(--accent)' } })),
-        el('span.num.dim', { text: String(v.sets) }),
-      );
-    });
-    append(wrap, [
-      el(
-        'div.chart-card',
-        null,
-        el('div.chart-title', { text: 'Hard sets this week' }),
-        el('p.xs.dim', { style: { margin: '0.25rem 0 0.75rem' }, text: 'Direct sets, filled against the top of this program’s weekly target. Amber means under the band — the priority muscles sit at 8–10 direct sets, held flat all block.' }),
-        el('div.stack', { style: { gap: '0.5rem' } }, ...rows),
-      ),
-    ]);
-  }
 
   // ---- per exercise
   const trained = [...new Set(sessions.flatMap((s) => (s.entries ?? []).map((e) => e.exerciseId)))]

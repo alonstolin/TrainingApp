@@ -38,11 +38,21 @@ test('moving the bands into the program bumped its version, and every earlier ve
   assert.equal(getProgram(1).version, 2, 'v1/v2 sessions still resolve the legacy file');
 });
 
-test('the Progress screen and the review tool both resolve bands from the program, with no private copy', () => {
-  for (const file of ['src/ui/screens/progress.js', 'tools/review.mjs']) {
-    const src = fs.readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
-    assert.match(src, /\btargetBand\(/, `${file} reads bands through targetBand`);
+test('Today (through the attendance core) and the review tool resolve bands from the program, and no screen keeps a private copy', () => {
+  const read = (file) => fs.readFileSync(new URL(`../../${file}`, import.meta.url), 'utf8');
+  for (const file of ['src/core/attendance.js', 'tools/review.mjs']) {
+    assert.match(read(file), /\btargetBand\(/, `${file} reads bands through targetBand`);
+  }
+  for (const file of ['src/core/attendance.js', 'tools/review.mjs', 'src/ui/screens/today.js', 'src/ui/screens/progress.js']) {
     // A hand-kept table looks like `'side-delts': { min:` or `'side-delts': [8,`.
-    assert.doesNotMatch(src, /['"]side-delts['"]\s*:\s*[[{]/, `${file} keeps a private band table`);
+    assert.doesNotMatch(read(file), /['"]side-delts['"]\s*:\s*[[{]/, `${file} keeps a private band table`);
+  }
+});
+
+test('"hard set" is retired: the count is direct sets, and no screen says otherwise', () => {
+  const dir = new URL('../../src/', import.meta.url);
+  const files = fs.readdirSync(dir, { recursive: true }).filter((f) => f.endsWith('.js'));
+  for (const f of files) {
+    assert.doesNotMatch(fs.readFileSync(new URL(f, dir), 'utf8'), /hard sets?\b/i, `src/${f} says "hard set"`);
   }
 });

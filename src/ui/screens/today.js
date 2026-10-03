@@ -9,6 +9,7 @@ import * as store from '../../data/store.js';
 import { CURRENT_PROGRAM } from '../../program/index.js';
 import { MUSCLE_LABELS } from '../../program/exercises.js';
 import { resolveToday, alternatives, overlapWarning } from '../../core/schedule.js';
+import { weekPicture } from '../../core/attendance.js';
 import { runLoadWarnings } from '../../core/progression.js';
 import { getExercise } from '../../program/exercises.js';
 import { backupNudge } from '../../data/backup.js';
@@ -225,6 +226,59 @@ function sessionCard(card, { hero = false } = {}) {
   );
 
   return body;
+}
+
+/**
+ * The week in one line, expanding into direct sets per muscle: done (solid)
+ * plus still ahead in the projection (light), against the band (shaded). A
+ * details element, so it is collapsed by default and needs no state of its own.
+ */
+function weekLine(state) {
+  const week = weekPicture(state, CURRENT_PROGRAM);
+  const { muscles } = week;
+  // One scale for every row, so a long bar means more sets, not a smaller band.
+  const scale = Math.max(1, ...muscles.map((m) => Math.max(m.band?.max ?? 0, m.done + m.ahead)));
+  const pct = (n) => `${(n / scale) * 100}%`;
+
+  const status = week.musclesShort
+    ? `${week.musclesShort} muscle${week.musclesShort === 1 ? '' : 's'} short`
+    : 'every muscle on track';
+  return el(
+    'details.card.weekline',
+    { dataset: { weekLine: '' } },
+    el(
+      'summary.weekline-summary',
+      null,
+      el('span.grow.small', {
+        text: `This week: ${week.sessions.done} of ${week.sessions.template} sessions · ${status}${week.role === 'deload' ? ' · deload' : ''}`,
+      }),
+      el('span.weekline-chev', { 'aria-hidden': 'true', text: '›' }),
+    ),
+    el(
+      'div.stack',
+      { style: { gap: '0.5rem', marginTop: '0.75rem' } },
+      ...muscles.map((m) =>
+        el(
+          'div.weekbar',
+          { dataset: { muscle: m.muscle, short: m.short ? 'true' : 'false' } },
+          el('span.truncate', { text: m.label }),
+          el(
+            'div.weekbar-track',
+            null,
+            m.band ? el('span.weekbar-band', { style: { left: pct(m.band.min), width: pct(m.band.max - m.band.min) } }) : null,
+            el('span.weekbar-done', { style: { width: pct(m.done) } }),
+            el('span.weekbar-ahead', { style: { left: pct(m.done), width: pct(m.ahead) } }),
+          ),
+          el('span.num.dim', { text: `${m.done} + ${m.ahead}` }),
+        ),
+      ),
+      el('p.xs.dim', {
+        text: `Direct sets: done + still ahead as the week is projected from where you are. The outlined span is the target band${
+          week.role === 'deload' ? ', cut for the deload' : ''
+        }; amber means short of it even if the rest of the week goes to plan.`,
+      }),
+    ),
+  );
 }
 
 /** The saved routes that fit a run card's target; planning one comes back here. */
@@ -505,6 +559,10 @@ export default function mountToday(root) {
       blocks.appendChild(group);
     }
 
+    // ---- the week, directly below the hero (on a rest day, below the rest card)
+    const week = weekLine(state);
+    if (!today.isRestDay || today.resume) blocks.appendChild(week);
+
     // ---- also today
     if (!today.resume && today.also.length) {
       const group = el('div.stack', null, el('div.section-label', { text: 'Also today' }));
@@ -548,6 +606,7 @@ export default function mountToday(root) {
         ),
       );
     }
+    if (today.isRestDay && !today.resume) blocks.appendChild(week);
 
     // ---- optional extras
     if (!today.resume && today.optional.length) {

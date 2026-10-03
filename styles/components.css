@@ -441,9 +441,22 @@
 }
 .chart-empty { color: var(--ink-4); font-size: var(--fs-sm); padding: var(--sp-5) 0; text-align: center; }
 
-.volbar { display: grid; grid-template-columns: 92px 1fr 34px; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
-.volbar-track { height: 8px; background: var(--surface-3); border-radius: var(--r-full); overflow: hidden; }
-.volbar-fill { height: 100%; background: var(--accent); border-radius: var(--r-full); }
+/* Today's week line: a details element, one line until opened. */
+.weekline { padding: var(--sp-3) var(--sp-4); }
+.weekline-summary { display: flex; align-items: center; gap: var(--sp-2); list-style: none; cursor: pointer; }
+.weekline-summary::-webkit-details-marker { display: none; }
+.weekline-chev { color: var(--ink-3); transition: transform 0.15s; }
+.weekline[open] .weekline-chev { transform: rotate(90deg); }
+.weekbar { display: grid; grid-template-columns: 92px minmax(0, 1fr) 44px; align-items: center; gap: var(--sp-2); font-size: var(--fs-sm); }
+.weekbar > .num { text-align: right; }
+.weekbar-track { position: relative; height: 10px; background: var(--surface-3); border-radius: var(--r-full); overflow: hidden; }
+.weekbar-track > span { position: absolute; top: 0; bottom: 0; }
+.weekbar-done { left: 0; background: var(--accent); }
+.weekbar-ahead { background: color-mix(in srgb, var(--accent) 40%, var(--surface-3)); }
+/* The band is an outline drawn over the bars, so its edges show at any fill. */
+.weekbar-band { z-index: 1; border: 2px solid var(--ink-2); border-radius: 3px; }
+.weekbar[data-short='true'] .weekbar-done { background: var(--warn); }
+.weekbar[data-short='true'] .weekbar-ahead { background: color-mix(in srgb, var(--warn) 40%, var(--surface-3)); }
 
 /* ---- Toast -------------------------------------------------------------- */
 

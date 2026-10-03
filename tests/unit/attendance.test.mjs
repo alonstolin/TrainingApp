@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { attendanceLedger, shortfallByMuscle } from '../../src/core/attendance.js';
+import { attendanceLedger, shortfallByMuscle, weekPicture } from '../../src/core/attendance.js';
 import { resolveLiftSession } from '../../src/core/prescribe.js';
 import { addDays } from '../../src/core/dates.js';
 import { mkSession, mkEntry, mkSet, program } from './_fixtures.mjs';
@@ -184,4 +184,78 @@ test('a partial week is judged on the days settled so far: a dropped set with no
   // The same week with a skip in it is not complete.
   sessions[1] = done('lift:A', addDays(MON, 2), { status: 'skipped' });
   assert.equal(ledgerOf(sessions, MON, addDays(MON, 2))[0].attendanceComplete, false);
+});
+
+// ---- the current week, for Today (issue #5) --------------------------------
+// Per muscle: direct sets done this week, direct sets still ahead in the
+// calendar projection, and the band. Hand counts from program.v3.js: side
+// delts are Upper Push 3 + Shoulders & Triceps 5, triceps 5 + 3, biceps
+// Lower 3 + Upper Pull 5.
+
+const pictureOf = (sessions, today, m = meta) => weekPicture({ sessions, meta: m }, program, { today });
+const muscleIn = (pic, muscle) => pic.muscles.find((m) => m.muscle === muscle);
+
+test('"still ahead" is the rest of the week as the calendar projects it', () => {
+  // Wednesday, Monday's Lower done: Upper Push, Upper Pull and Shoulders & Triceps remain.
+  const pic = pictureOf(fullWeek(MON).slice(0, 1), addDays(MON, 2));
+  assert.deepEqual(pic.sessions, { done: 1, template: 4 });
+  assert.deepEqual([muscleIn(pic, 'side-delts').done, muscleIn(pic, 'side-delts').ahead], [0, 8]);
+  assert.deepEqual([muscleIn(pic, 'triceps').done, muscleIn(pic, 'triceps').ahead], [0, 8]);
+  assert.deepEqual([muscleIn(pic, 'biceps').done, muscleIn(pic, 'biceps').ahead], [3, 5]);
+});
+
+test('falling behind shows in what is still ahead: the projection follows the cursor, not the weekday', () => {
+  // Monday missed: the cursor still owes Lower, so Wednesday projects Lower,
+  // Friday Upper Push, Sunday Upper Pull — and Shoulders & Triceps falls out of the week.
+  const pic = pictureOf([], addDays(MON, 2));
+  assert.deepEqual(pic.sessions, { done: 0, template: 4 });
+  assert.equal(muscleIn(pic, 'side-delts').ahead, 3);
+  assert.equal(muscleIn(pic, 'triceps').ahead, 5);
+  assert.equal(muscleIn(pic, 'biceps').ahead, 8);
+});
+
+test('early in the week nothing is short while done plus ahead still reaches the band', () => {
+  // Monday morning, nothing done: every set is still ahead.
+  const pic = pictureOf([], MON);
+  assert.deepEqual(muscleIn(pic, 'side-delts'), { muscle: 'side-delts', label: 'Side delts', done: 0, ahead: 8, band: { min: 8, max: 10 }, short: false });
+  assert.equal(pic.musclesShort, 0);
+  assert.deepEqual(pic.muscles.filter((m) => m.short), []);
+  // In the program's band order — the priority muscles first.
+  assert.deepEqual(pic.muscles.slice(0, 4).map((m) => m.muscle), ['side-delts', 'rear-delts', 'triceps', 'biceps']);
+});
+
+test('a skipped day makes its muscles short once the rest of the week cannot cover them', () => {
+  // Friday: Lower done, Upper Push skipped. Upper Pull and Shoulders & Triceps remain.
+  const sessions = [done('lift:B', MON), done('lift:A', addDays(MON, 2), { status: 'skipped' })];
+  const pic = pictureOf(sessions, addDays(MON, 4));
+  assert.deepEqual(pic.sessions, { done: 1, template: 4 });
+  assert.deepEqual([muscleIn(pic, 'side-delts').ahead, muscleIn(pic, 'side-delts').short], [5, true]);
+  assert.deepEqual([muscleIn(pic, 'triceps').ahead, muscleIn(pic, 'triceps').short], [3, true]);
+  assert.equal(muscleIn(pic, 'chest').short, false, 'Shoulders & Triceps still brings 3 chest sets, the band\'s low edge');
+  assert.equal(muscleIn(pic, 'core').short, false, 'Lower already banked 8 core sets against a low edge of 6');
+  assert.deepEqual(pic.muscles.filter((m) => m.short).map((m) => m.muscle).sort(), ['side-delts', 'triceps']);
+  assert.equal(pic.musclesShort, 2);
+});
+
+test('a deload week halves the bands and what is still ahead, so it reads as no shortfall', () => {
+  // The v3 entry deload: Monday, nothing done, every day ahead resolved as a deload.
+  const deloadMeta = { v3StartedAt: { ...meta.v3StartedAt, deloadFirst: true } };
+  const pic = pictureOf([], MON, deloadMeta);
+  assert.equal(pic.role, 'deload');
+  // Side delts: 3 → 2 on Upper Push, 3 → 2 and 2 → 1 on Shoulders & Triceps.
+  assert.deepEqual(muscleIn(pic, 'side-delts'), { muscle: 'side-delts', label: 'Side delts', done: 0, ahead: 5, band: { min: 4, max: 5 }, short: false });
+  assert.deepEqual(muscleIn(pic, 'back').band, { min: 3, max: 7 }, 'an odd band rounds toward the lenient side');
+  assert.equal(pic.musclesShort, 0);
+  assert.equal(pictureOf([], MON).role, 'probe');
+});
+
+test('the band follows the role the week\'s sessions ran under, even once the cursor has moved on', () => {
+  // The entry deload, all four days done by Thursday: the cursor has moved on
+  // to the first probe week, but this week was a deload and is judged as one.
+  const deloadMeta = { v3StartedAt: { ...meta.v3StartedAt, deloadFirst: true } };
+  const sessions = WEEK.map(([k], i) => done(k, addDays(MON, i), { role: 'deload' }));
+  const pic = pictureOf(sessions, addDays(MON, 4), deloadMeta);
+  assert.equal(pic.role, 'deload');
+  assert.deepEqual(muscleIn(pic, 'side-delts').band, { min: 4, max: 5 });
+  assert.equal(muscleIn(pic, 'side-delts').short, false);
 });

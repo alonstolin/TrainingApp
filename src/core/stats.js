@@ -164,7 +164,7 @@ export function coreSeries(sessions, exerciseId) {
   return out;
 }
 
-/** Hard set count per muscle for a given week — the MEV/MAV sanity check. */
+/** Direct sets per muscle for a given week — every completed working set, credited to the primary muscle. */
 export function weeklyVolumeByMuscle(sessions, weekStartDate) {
   const counts = new Map();
   for (const s of sessions) {
@@ -173,8 +173,8 @@ export function weeklyVolumeByMuscle(sessions, weekStartDate) {
     for (const entry of s.entries ?? []) {
       const ex = getExercise(entry.exerciseId);
       if (!ex.muscle) continue;
-      const hard = (entry.sets ?? []).filter((x) => x.done && x.type !== 'warmup').length;
-      if (hard) counts.set(ex.muscle, (counts.get(ex.muscle) ?? 0) + hard);
+      const direct = (entry.sets ?? []).filter((x) => x.done && x.type !== 'warmup').length;
+      if (direct) counts.set(ex.muscle, (counts.get(ex.muscle) ?? 0) + direct);
     }
   }
   return [...counts.entries()]
@@ -185,8 +185,8 @@ export function weeklyVolumeByMuscle(sessions, weekStartDate) {
 /**
  * A muscle's weekly direct-set band, `{ min, max }`, from the program's own
  * content — or null when the program sets none for it (v2 had no bands). The
- * one way any reader gets a band, so Progress and the review report (and Today,
- * when it shows sets per muscle) cannot drift apart.
+ * one way any reader gets a band, so Today's sets per muscle (through
+ * weekPicture) and the review report cannot drift apart.
  */
 export function targetBand(program, muscle) {
   return program.volumeTargets?.[muscle] ?? null;

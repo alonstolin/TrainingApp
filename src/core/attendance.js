@@ -6,11 +6,17 @@
 
 import { getExercise, MUSCLE_LABELS } from '../program/exercises.js';
 import { CURRENT_PROGRAM, getProgram } from '../program/index.js';
-import { resolveLiftSession } from './prescribe.js';
+import { resolveLiftSession, weekModifier } from './prescribe.js';
 import { deriveCursors } from './schedule.js';
-import { slotLabel } from './calendar.js';
-import { weeklyVolumeByMuscle } from './stats.js';
-import { startOfWeek, addDays } from './dates.js';
+import { slotLabel, buildCalendar } from './calendar.js';
+import { weeklyVolumeByMuscle, targetBand } from './stats.js';
+import { startOfWeek, addDays, trainingDate } from './dates.js';
+
+/** Adds per-muscle counts `from` into `into`. */
+function addCounts(into, from) {
+  for (const [muscle, n] of from) into.set(muscle, (into.get(muscle) ?? 0) + n);
+  return into;
+}
 
 /** The template week's lift days — the optional bonus day is never a target. */
 const templateDays = (program) =>
@@ -25,10 +31,22 @@ function prescribedSets(program, dayKey, { role, coreCompleted }) {
   for (const e of resolveLiftSession(program, dayKey, { role, coreCompleted }).entries) {
     const muscle = getExercise(e.exerciseId).muscle;
     if (!muscle) continue;
-    const n = e.plannedSets.filter((p) => p.type !== 'warmup').length;
-    counts.set(muscle, (counts.get(muscle) ?? 0) + n);
+    addCounts(counts, [[muscle, e.plannedSets.filter((p) => p.type !== 'warmup').length]]);
   }
   return counts;
+}
+
+/**
+ * A muscle's band for a week of `role`. A deload scales it by the deload's own
+ * set multiplier, rounding outward: the deload rounds each block's halved sets
+ * to the nearest whole set, so it lands at or a little over half the template,
+ * and a band rounded inward would call that short.
+ */
+function bandFor(program, muscle, role) {
+  const band = targetBand(program, muscle);
+  const multiplier = weekModifier(program, role).setMultiplier ?? 1;
+  if (!band || multiplier === 1) return band;
+  return { min: Math.floor(band.min * multiplier), max: Math.ceil(band.max * multiplier) };
 }
 
 /** The program version recorded by the latest of `sessions`, or null. */
@@ -79,11 +97,7 @@ export function attendanceLedger(sessions, { from, to, meta, programFor = getPro
 
     // Each day resolved once per week; the template and what is owed both sum it.
     const resolved = new Map(days.map((key) => [key, prescribedSets(program, key, ctx)]));
-    const sum = (keys) => {
-      const total = new Map();
-      for (const key of keys) for (const [m, n] of resolved.get(key)) total.set(m, (total.get(m) ?? 0) + n);
-      return total;
-    };
+    const sum = (keys) => keys.reduce((total, key) => addCounts(total, resolved.get(key)), new Map());
     const template = sum(days);
     const performed = new Map(weeklyVolumeByMuscle(week, weekStart).map((r) => [r.muscle, r.sets]));
     const done = logged.filter((s) => s.status === 'completed').length;
@@ -149,4 +163,58 @@ export function shortfallByMuscle(ledger) {
   return [...out.values()]
     .map((r) => ({ ...r, reading: !r.fullAttendance ? 'attendance' : !r.incompleteAttendance ? 'volume' : 'mixed' }))
     .sort((a, b) => b.shortfall - a.shortfall);
+}
+
+/**
+ * The current week, for Today: per muscle, the direct sets done so far and
+ * the direct sets still ahead. "Ahead" is read off the calendar projection —
+ * where the cursor actually is, not the weekday layout — so falling behind
+ * shows here, and Today and the Calendar cannot disagree about what remains.
+ *
+ * A muscle is short only when done plus ahead falls below its band, so being
+ * early in the week flags nothing. In a deload both the band and what is
+ * ahead are the deload's. Muscles come in the program's band order, then the
+ * band-less ones alphabetically.
+ *
+ * @returns {{ weekStart, role, sessions:{done, template}, musclesShort,
+ *   muscles:Array<{muscle, label, done, ahead, band, short}> }}
+ */
+export function weekPicture(state, program, { today = trainingDate() } = {}) {
+  const weekStart = startOfWeek(today);
+  const sessions = state.sessions ?? [];
+  const cursors = deriveCursors(sessions, program, { meta: state.meta, today });
+  const days = templateDays(program);
+
+  const ahead = new Map();
+  const projection = buildCalendar(state, program, { from: today, to: addDays(weekStart, 6), today, includeOptional: false });
+  for (const day of projection) {
+    for (const e of day.entries) {
+      if (!e.projected || e.track !== 'lift') continue;
+      addCounts(ahead, prescribedSets(program, e.key, { role: e.role, coreCompleted: cursors.core.completed }));
+    }
+  }
+  const done = new Map(weeklyVolumeByMuscle(sessions, weekStart).map((r) => [r.muscle, r.sets]));
+  const thisWeek = sessions.filter(
+    (s) => startOfWeek(s.date) === weekStart && s.kind === 'lift' && s.status === 'completed' && days.includes(s.dayKey),
+  );
+  // As in the ledger, the week's role is the one its sessions ran under, so a
+  // deload is not re-judged as a probe week once the cursor moves past it.
+  const role = thisWeek.find((s) => s.programRef?.role)?.programRef.role ?? cursors.role;
+
+  const muscles = [...new Set([...done.keys(), ...ahead.keys()])].map((muscle) => {
+    const d = done.get(muscle) ?? 0;
+    const a = ahead.get(muscle) ?? 0;
+    const band = bandFor(program, muscle, role);
+    return { muscle, label: MUSCLE_LABELS[muscle] ?? muscle, done: d, ahead: a, band, short: !!band && d + a < band.min };
+  });
+  const order = Object.keys(program.volumeTargets ?? {});
+  const rank = (m) => (order.includes(m.muscle) ? order.indexOf(m.muscle) : order.length);
+  muscles.sort((a, b) => rank(a) - rank(b) || a.label.localeCompare(b.label));
+  return {
+    weekStart,
+    role,
+    sessions: { done: thisWeek.length, template: days.length },
+    musclesShort: muscles.filter((m) => m.short).length,
+    muscles,
+  };
 }

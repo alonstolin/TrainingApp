@@ -4,6 +4,29 @@ Dated. Newest first. Each entry says what changed, what data or evidence it
 rested on, and where the detail lives. This is the memory of the program that
 survives any chat.
 
+## 2026-10-03 — Sets per muscle on Today: when a muscle reads as short
+
+**What:** Today shows the current week's direct sets per muscle, done plus
+still ahead, against the program's band (`weekPicture` in `core/attendance.js`,
+issue #5). The rules:
+
+- **Still ahead** is read off the calendar projection, which follows the cursor,
+  not the weekday layout. A missed day therefore shows up as a day dropping out
+  of the week, and Today and the Calendar cannot disagree about it.
+- A muscle is **short** only when done plus still ahead is below the band's low
+  edge. Being early in the week flags nothing.
+- In a **deload** the band is scaled by the deload's own set multiplier,
+  **rounding outward**: the low edge down and the high edge up. The deload
+  rounds each block's halved sets to the nearest whole set, so it lands at or
+  a little over half the template, and a band rounded inward would call a
+  correctly run deload short. Side delts 8–10 become 4–5; back 7–13 becomes 3–7.
+- The week's role is the one its sessions recorded, as in the shortfall ledger,
+  so a deload week is not re-judged as a probe week once the cursor moves past
+  it mid-week.
+
+The count is **direct sets**. The "Hard sets this week" panel left Progress,
+because it never checked effort.
+
 ## 2026-10-03 — How a week is judged for shortfall
 
 **What:** the shortfall ledger (`core/attendance.js`, issue #3) judges every week
