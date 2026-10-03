@@ -22,7 +22,7 @@ import {
   blockReference, e1rm, effectiveLoad, formatPace, runLoadWarnings, loadFromReference,
 } from '../src/core/progression.js';
 import {
-  coreAdherence, easyRunEffortByWeekday, weeklyRunVolume, runSeries, weeklyVolumeByMuscle,
+  coreAdherence, easyRunEffortByWeekday, weeklyRunVolume, runSeries, weeklyVolumeByMuscle, targetBand,
 } from '../src/core/stats.js';
 import { startOfWeek, addDays, daysBetween, formatDuration, trainingDate } from '../src/core/dates.js';
 import { PROGRAMS, CURRENT_PROGRAM, getExercise, MAIN_LIFTS, MUSCLE_LABELS } from '../src/program/index.js';
@@ -377,24 +377,6 @@ table(['Exercise', 'Gym / station', 'Sessions', 'Last', 'Trend'], accRows);
 // 4b. Volume per muscle
 // ---------------------------------------------------------------------------
 
-/**
- * v3 weekly DIRECT-set targets (SYNTHESIS §2.1), the same bands the Progress
- * screen fills its bars against. Flat across the block, not ramped.
- */
-const VOLUME_TARGET = {
-  'side-delts': [8, 10],
-  'rear-delts': [6, 8],
-  triceps: [8, 10],
-  biceps: [8, 10],
-  chest: [3, 7],
-  'front-delts': [3, 7],
-  back: [7, 13],
-  quads: [3, 6],
-  hamstrings: [3, 4],
-  calves: [2, 4],
-  core: [6, 12],
-};
-
 h(2, 'Volume per muscle');
 p(
   'Direct sets per week — one owner per set, the exercise\'s primary muscle. This is the LOG half of "what is lagging": ' +
@@ -426,16 +408,20 @@ else {
   const rows = muscles.map((m) => {
     const perWeek = trained.map((w) => w.rows.find((r) => r.muscle === m)?.sets ?? 0);
     const mean = perWeek.reduce((a, b) => a + b, 0) / (perWeek.length || 1);
-    const band = VOLUME_TARGET[m];
+    // Judged against the CURRENT program's band, not `program` above: this
+    // section is "vs v3 target" whatever version the backup records, and the
+    // v2 file has no bands at all.
+    const band = targetBand(CURRENT_PROGRAM, m);
+    const range = band && `${band.min}–${band.max}`;
     const verdict = !band
       ? '—'
-      : mean < band[0] - 0.5
-        ? `**under** (${band[0]}–${band[1]})`
-        : mean > band[1] + 0.5
-          ? `over (${band[0]}–${band[1]})`
-          : `in band (${band[0]}–${band[1]})`;
-    if (band && mean < band[0] - 0.5 && PRIORITY.includes(m)) {
-      flagIt('volume', `${MUSCLE_LABELS[m] ?? m}: ${fmt(mean)} direct sets/week against a ${band[0]}–${band[1]} target — a priority muscle under its band (§2.1).`);
+      : mean < band.min - 0.5
+        ? `**under** (${range})`
+        : mean > band.max + 0.5
+          ? `over (${range})`
+          : `in band (${range})`;
+    if (band && mean < band.min - 0.5 && PRIORITY.includes(m)) {
+      flagIt('volume', `${MUSCLE_LABELS[m] ?? m}: ${fmt(mean)} direct sets/week against a ${range} target — a priority muscle under its band (§2.1).`);
     }
     return [MUSCLE_LABELS[m] ?? m, fmt(mean), perWeek.join(' · '), verdict];
   });

@@ -9,6 +9,8 @@ import { resolveSession } from '../../src/core/prescribe.js';
 import { deriveCursors, makeHistoryLookup } from '../../src/core/schedule.js';
 import { buildBackup } from '../../src/core/schema.js';
 import { addDays, dayOfWeek } from '../../src/core/dates.js';
+import { targetBand } from '../../src/core/stats.js';
+import { MUSCLE_LABELS } from '../../src/program/exercises.js';
 import { program } from './_fixtures.mjs';
 
 // Temp directories are cleaned up rather than left in os.tmpdir() by every run.
@@ -292,6 +294,16 @@ test('the report counts direct sets per muscle, which is the log half of "what i
   assert.ok(sideDelts, section);
   assert.ok(Number(sideDelts[1]) >= 6, `side delts ${sideDelts[1]}/wk looks wrong`);
   assert.match(section, /in band \(8–10\)|under \(8–10\)|over \(8–10\)/);
+  // Every muscle's band is the program's own (issue #2): no private copy.
+  let banded = 0;
+  for (const [muscle, label] of Object.entries(MUSCLE_LABELS)) {
+    const row = section.match(new RegExp(`\\| ${label} \\|[^\\n]*\\((\\d+)–(\\d+)\\) \\|`));
+    const band = targetBand(program, muscle);
+    if (!row) continue;
+    assert.deepEqual({ min: Number(row[1]), max: Number(row[2]) }, band, `${label} band`);
+    banded++;
+  }
+  assert.ok(banded >= 6, `only ${banded} muscles carried a band:\n${section}`);
   // Weeks with no lifting must not be averaged in as zeros.
   assert.match(section, /Weeks counted: \d+ of \d+/);
 });

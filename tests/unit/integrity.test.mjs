@@ -82,7 +82,7 @@ test('a session logged under an older program version is not flagged when an exe
       { exerciseId: 'lat-pulldown', order: 2, plannedSets: [] },
     ],
   };
-  assert.equal(program.version, 4, 'the bump is what makes this work');
+  assert.ok(program.version > 3, 'the bump past 3 is what makes this work');
   assert.deepEqual(sessionIntegrity(old, program).problems, []);
 
   // A session claiming the CURRENT version with the same contents is still

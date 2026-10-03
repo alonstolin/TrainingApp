@@ -165,6 +165,16 @@ export function weeklyVolumeByMuscle(sessions, weekStartDate) {
 }
 
 /**
+ * A muscle's weekly direct-set band, `{ min, max }`, from the program's own
+ * content — or null when the program sets none for it (v2 had no bands). The
+ * one way any reader gets a band, so Progress and the review report (and Today,
+ * when it shows sets per muscle) cannot drift apart.
+ */
+export function targetBand(program, muscle) {
+  return program.volumeTargets?.[muscle] ?? null;
+}
+
+/**
  * Core adherence: of the lift sessions that carry core work at the end, how
  * many actually logged any of it? Below 75% the placement is wrong again
  * (SYNTHESIS §5.4) — the mat programme failed the same way.

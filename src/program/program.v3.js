@@ -32,7 +32,9 @@ export default {
   // logged entries against the day's block list ONLY when the session's version
   // equals the program's, so leaving this at 3 would flag every Upper Pull
   // already in the log as a prescription mismatch.
-  version: 4,
+  // v5 = v4 with the per-muscle volume targets moved in as content (2026-10-03);
+  // no prescription changed.
+  version: 5,
   name: 'Strength · Shoulders & Arms · 10K',
 
   liftsPerWeek: 4,
@@ -94,6 +96,26 @@ export default {
       note: 'DELOAD. Half the sets, main lifts stay at 80% of reference for 2×4, accessories at 90%. Do not freelance extra work.',
     },
   ],
+
+  /**
+   * Weekly DIRECT-set target per muscle (§2.1): flat across the block, not
+   * ramped. `min` is the low edge of the band; `max` is its top. Legs are
+   * maintenance. The one source for every reader — Progress and the review
+   * report today — read through targetBand() in core/stats.js, never copied.
+   */
+  volumeTargets: {
+    'side-delts': { min: 8, max: 10 },
+    'rear-delts': { min: 6, max: 8 },
+    triceps: { min: 8, max: 10 },
+    biceps: { min: 8, max: 10 },
+    chest: { min: 3, max: 7 },
+    'front-delts': { min: 3, max: 7 },
+    back: { min: 7, max: 13 },
+    quads: { min: 3, max: 6 },
+    hamstrings: { min: 3, max: 4 },
+    calves: { min: 2, max: 4 },
+    core: { min: 6, max: 12 },
+  },
 
   liftDays: {
     B: {

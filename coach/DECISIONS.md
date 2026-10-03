@@ -4,6 +4,22 @@ Dated. Newest first. Each entry says what changed, what data or evidence it
 rested on, and where the detail lives. This is the memory of the program that
 survives any chat.
 
+## 2026-10-03 — Volume targets move into the program (program v5)
+
+**What:** the weekly direct-set band per muscle (SYNTHESIS §2.1) is now program
+content, `volumeTargets` in `program.v3.js`, read through `targetBand()` in
+`core/stats.js`. The Progress sets panel and the review report's volume section
+both read it there; each used to keep its own hand-copied table. Program version
+bumped 4 → 5. **No band and no prescription changed** — the review report on the
+2026-10-01 backup is identical apart from the version in its header.
+
+**Basis:** issue #2, the prefactor for the shortfall ledger (#3) and Today's sets
+per muscle. Three readers of one target need one source. Being program content,
+a band can only change with a version bump. That alone does not stop a band edit
+re-judging old weeks: versions 3–5 all map to `program.v3.js`, and both readers
+judge against the current program. A band change that must leave old weeks
+alone has to split the file, as any shape change does.
+
 ## 2026-09-30 — The block reference is monotone (R1)
 
 **What:** a test-week probe now seeds the next block's reference **only if it

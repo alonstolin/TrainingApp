@@ -7,7 +7,7 @@ import { MAIN_LIFTS, getExercise, MUSCLE_LABELS } from '../../program/exercises.
 import { CURRENT_PROGRAM } from '../../program/index.js';
 import {
   e1rmSeries, topSetSeries, runSeries, weeklyRunVolume, coreSeries,
-  weeklyVolumeByMuscle, runMilestones, coreAdherence, easyRunEffortByWeekday,
+  weeklyVolumeByMuscle, runMilestones, coreAdherence, easyRunEffortByWeekday, targetBand,
 } from '../../core/stats.js';
 import { corePhaseFor } from '../../core/prescribe.js';
 import { formatPace } from '../../core/progression.js';
@@ -18,23 +18,6 @@ const LIFT_COLOR = {
   'incline-bench': 'var(--incline)',
   ohp: 'var(--ohp)',
   'weighted-pullup': 'var(--pullup)',
-};
-
-// v3 weekly DIRECT-set targets per muscle (SYNTHESIS §2.1): flat, not ramped.
-// The old RP MEV/MAV landmarks were unmeasured expert opinion and are gone.
-// `min` is the low edge of the band; `max` fills the bar. Legs are maintenance.
-const LANDMARKS = {
-  'side-delts': { min: 8, max: 10 },
-  'rear-delts': { min: 6, max: 8 },
-  triceps: { min: 8, max: 10 },
-  biceps: { min: 8, max: 10 },
-  chest: { min: 3, max: 7 },
-  'front-delts': { min: 3, max: 7 },
-  back: { min: 7, max: 13 },
-  quads: { min: 3, max: 6 },
-  hamstrings: { min: 3, max: 4 },
-  calves: { min: 2, max: 4 },
-  core: { min: 6, max: 12 },
 };
 
 function trendDelta(points) {
@@ -131,14 +114,15 @@ function liftsTab(sessions) {
     ),
   ]);
 
-  // ---- weekly volume vs landmarks
+  // ---- weekly volume vs the program's direct-set bands (SYNTHESIS §2.1):
+  // `min` is the low edge of the band; `max` fills the bar.
   const thisWeek = startOfWeek(trainingDate());
   const vol = weeklyVolumeByMuscle(sessions, thisWeek);
   if (vol.length) {
     const rows = vol.map((v) => {
-      const lm = LANDMARKS[v.muscle];
-      const pct = lm ? Math.min(100, (v.sets / lm.max) * 100) : Math.min(100, v.sets * 5);
-      const under = lm && v.sets < lm.min;
+      const band = targetBand(CURRENT_PROGRAM, v.muscle);
+      const pct = band ? Math.min(100, (v.sets / band.max) * 100) : Math.min(100, v.sets * 5);
+      const under = band && v.sets < band.min;
       return el(
         'div.volbar',
         null,
