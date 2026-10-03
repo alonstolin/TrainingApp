@@ -112,3 +112,33 @@ export function validateRoute(r, label = 'route') {
   }
   return errs;
 }
+
+/** How far either side of a target a route may be and still fit (issue #4). */
+export const FIT_TOLERANCE = 0.1;
+
+/**
+ * Saved routes that fit a run's target, closest first. A route is only ever
+ * suggested here — it is chosen for a run in the session's "Which route?" card,
+ * and nothing is stored against a planned day.
+ *
+ * A distance target matches within ±10%. A time target (easy runs early in the
+ * build) is first turned into a distance at the athlete's easy pace, and the
+ * result says it is an estimate. With no easy pace yet there is nothing to
+ * convert with, so every route comes back, shortest first, marked unmatched.
+ *
+ * @param {Array<{km:number}>} routes
+ * @param {{kind:'distance', km:number}|{kind:'time', minutes:number}} target
+ * @param {{paceSecPerKm?:number|null}} o — easy pace, for time targets
+ * @returns {{ match:'distance'|'estimate'|'unmatched', km:number|null, routes:Array }}
+ */
+export function routesThatFit(routes, target, { paceSecPerKm = null } = {}) {
+  const estimate = target.kind === 'time';
+  if (estimate && !paceSecPerKm) {
+    return { match: 'unmatched', km: null, routes: [...(routes ?? [])].sort((a, b) => a.km - b.km) };
+  }
+  const km = estimate ? Math.round(((target.minutes * 60) / paceSecPerKm) * 100) / 100 : target.km;
+  const fits = (routes ?? [])
+    .filter((r) => Math.abs(r.km - km) <= km * FIT_TOLERANCE + 1e-9)
+    .sort((a, b) => Math.abs(a.km - km) - Math.abs(b.km - km) || a.km - b.km);
+  return { match: estimate ? 'estimate' : 'distance', km, routes: fits };
+}

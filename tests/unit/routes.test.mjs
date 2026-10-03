@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  routeDistanceKm, closeLoop, outAndBack, bounds, nearestSegment, pointToSegmentMeters, insertWaypoint, makeRoute, validateRoute,
+  routeDistanceKm, closeLoop, outAndBack, bounds, nearestSegment, pointToSegmentMeters, insertWaypoint, makeRoute, validateRoute, routesThatFit,
 } from '../../src/core/routes.js';
 import { validateBackup, buildBackup } from '../../src/core/schema.js';
 
@@ -88,4 +88,39 @@ test('routes travel in the backup envelope and bad ones are dropped with a warni
   // Old backups without routes still validate and gain an empty list.
   const old = validateBackup({ format: 'trainingapp-backup', schemaVersion: 1, sessions: [], meta: {} });
   assert.deepEqual(old.data.routes, []);
+});
+
+// ---------------------------------------------------------------------------
+// Routes that fit a run's target (issue #4)
+// ---------------------------------------------------------------------------
+
+const bank = (...kms) => kms.map((km, i) => ({ id: `r${i}`, name: `Loop ${km}`, km, waypoints: [] }));
+const kmsOf = (fit) => fit.routes.map((r) => r.km);
+
+test('a distance target fits routes within 10% either side, both edges included, closest first', () => {
+  const fit = routesThatFit(bank(4.49, 4.5, 5.2, 5, 5.5, 5.51, 8), { kind: 'distance', km: 5 });
+  assert.equal(fit.match, 'distance');
+  assert.equal(fit.km, 5);
+  assert.deepEqual(kmsOf(fit), [5, 5.2, 4.5, 5.5]);
+});
+
+test('a time target is converted at the easy pace and marked as an estimate', () => {
+  // 30 min at 6:00 /km is 5 km, so the same ±10% window applies around it.
+  const fit = routesThatFit(bank(4.4, 4.6, 5.4, 5.6), { kind: 'time', minutes: 30 }, { paceSecPerKm: 360 });
+  assert.equal(fit.match, 'estimate');
+  assert.equal(fit.km, 5);
+  assert.deepEqual(kmsOf(fit), [4.6, 5.4]);
+});
+
+test('with no easy pace yet, a time target lists every route, shortest first, as unmatched', () => {
+  const fit = routesThatFit(bank(8, 3.2, 5), { kind: 'time', minutes: 30 }, { paceSecPerKm: null });
+  assert.equal(fit.match, 'unmatched');
+  assert.equal(fit.km, null);
+  assert.deepEqual(kmsOf(fit), [3.2, 5, 8]);
+});
+
+test('an empty bank fits nothing, whatever the target', () => {
+  assert.deepEqual(routesThatFit([], { kind: 'distance', km: 5 }).routes, []);
+  assert.deepEqual(routesThatFit([], { kind: 'time', minutes: 30 }, { paceSecPerKm: 360 }).routes, []);
+  assert.deepEqual(routesThatFit([], { kind: 'time', minutes: 30 }).routes, []);
 });

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {
   coreAdherence, easyRunEffortByWeekday,
   e1rmSeries, runSeries, weeklyRunVolume, coreSeries,
-  weeklyVolumeByMuscle, personalBests, runMilestones, topSetSeries,
+  weeklyVolumeByMuscle, personalBests, runMilestones, topSetSeries, easyPaceSecPerKm,
 } from '../../src/core/stats.js';
 import { mkSession, mkEntry, mkSet, program } from './_fixtures.mjs';
 
@@ -152,4 +152,18 @@ test('easy-run effort is summarised by weekday with CR10 and talk-test failure r
   const thu = rows.find((r) => r.dow === 4);
   assert.deepEqual([tue.runs, tue.meanRpe, tue.talkNegativePct], [2, 5.5, 50]);
   assert.deepEqual([thu.runs, thu.meanRpe, thu.talkNegativePct], [1, 3, 0]);
+});
+
+test('easy pace is the median of the easy runs in the last 28 days', () => {
+  const run = (date, variant, km, durationSec) => mkSession({ kind: 'run', variant, dayKey: `run:${variant}`, date, run: { distanceKm: km, durationSec } });
+  const today = '2026-10-31';
+  const sessions = [
+    run('2026-10-07', 'easy', 5, 1800), // 6:00
+    run('2026-10-14', 'easy', 4, 1560), // 6:30
+    run('2026-10-28', 'easy', 4, 2160), // 9:00, a walk-run day: the median shrugs it off
+    run('2026-10-25', 'long', 8, 2400), // 5:00, a long run — not easy-run pace
+    run('2026-09-01', 'easy', 5, 1500), // 5:00, too old to count
+  ];
+  assert.equal(easyPaceSecPerKm(sessions, today), 390);
+  assert.equal(easyPaceSecPerKm(sessions.slice(3), today), null, 'no recent easy run, no pace');
 });

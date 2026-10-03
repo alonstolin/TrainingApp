@@ -12,9 +12,10 @@ import { openSheet } from '../sheet.js';
 import * as store from '../../data/store.js';
 import { CURRENT_PROGRAM } from '../../program/index.js';
 import { buildCalendar, weekPattern, monthGrid, projectGoalDate } from '../../core/calendar.js';
-import { resolveLiftSession } from '../../core/prescribe.js';
+import { resolveLiftSession, resolveRunSession } from '../../core/prescribe.js';
 import { trainingDate, parseLocalDate, formatDate, formatRelativeDate, addDays, dayName } from '../../core/dates.js';
 import { navigate } from '../../router.js';
+import { routeFitCard } from './routes.js';
 
 const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
   'July', 'August', 'September', 'October', 'November', 'December'];
@@ -31,6 +32,13 @@ const dotClass = (e) =>
 
 function dayDetailSheet(dayEntry) {
   const { date, entries } = dayEntry;
+  // Anything in the sheet that navigates closes it first, or its backdrop
+  // would swallow the next screen's taps.
+  let close = () => {};
+  const go = (path) => {
+    close();
+    navigate(path);
+  };
 
   const rows = entries.map((e) => {
     const card = el(
@@ -84,16 +92,26 @@ function dayDetailSheet(dayEntry) {
       }
     }
 
+    // For a planned run day: its target, and the saved routes that fit it.
+    // Suggested only — the route is still chosen when the run starts.
+    if (e.projected && e.track === 'run' && e.key?.startsWith('run:')) {
+      const run = resolveRunSession(CURRENT_PROGRAM, e.key.split(':')[1], e.runWeek);
+      append(card, [
+        el('div.hero-focus', { style: { marginTop: '0.6rem' }, text: `Target: ${run.label}` }),
+        el('div', { style: { marginTop: '0.75rem' } }, routeFitCard(run.target, { back: `calendar?day=${date}`, go })),
+      ]);
+    }
+
     if (e.sessionId) {
       return onTap(
         el('button', { type: 'button', style: { display: 'block', width: '100%', textAlign: 'left' } }, card),
-        () => navigate(`/session/${e.sessionId}`),
+        () => go(`/session/${e.sessionId}`),
       );
     }
     return card;
   });
 
-  openSheet({
+  close = openSheet({
     title: `${dayName(date)} ${formatDate(date)}`,
     subtitle: entries.length
       ? entries.some((x) => x.projected)
@@ -112,6 +130,16 @@ export default function mountCalendar(root) {
   const now = parseLocalDate(today);
   let year = now.getFullYear();
   let month = now.getMonth();
+
+  // `#/calendar?day=…` reopens that day's preview: planning a route from a
+  // planned run day comes back to the day it started from.
+  const day = new URLSearchParams(window.location.hash.split('?')[1] ?? '').get('day');
+  const reopen = /^\d{4}-\d{2}-\d{2}$/.test(day ?? '') ? day : null;
+  if (reopen) {
+    const d = parseLocalDate(reopen);
+    year = d.getFullYear();
+    month = d.getMonth();
+  }
 
   const render = () => {
     const state = store.getState();
@@ -288,5 +316,9 @@ export default function mountCalendar(root) {
   };
 
   render();
+  if (reopen) {
+    const [entry] = buildCalendar(store.getState(), CURRENT_PROGRAM, { from: reopen, to: reopen, today, includeOptional: true });
+    dayDetailSheet(entry);
+  }
   return { unmount: store.subscribe(render) };
 }

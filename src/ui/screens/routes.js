@@ -14,7 +14,9 @@ import { toast } from '../toast.js';
 import * as store from '../../data/store.js';
 import { CURRENT_PROGRAM } from '../../program/index.js';
 import { createMap, currentPosition } from '../map.js';
-import { routeDistanceKm, closeLoop, outAndBack, insertWaypoint, nearestSegment } from '../../core/routes.js';
+import { routeDistanceKm, closeLoop, outAndBack, insertWaypoint, nearestSegment, routesThatFit, FIT_TOLERANCE } from '../../core/routes.js';
+import { easyPaceSecPerKm, EASY_PACE_WINDOW_DAYS } from '../../core/stats.js';
+import { formatPace } from '../../core/progression.js';
 import { formatRelativeDate } from '../../core/dates.js';
 import { navigate } from '../../router.js';
 
@@ -34,6 +36,79 @@ function currentTarget() {
   };
 }
 
+/** Where `?back=` returns to. Today lives at `/`, so it travels as 'today'. */
+const backPath = (back, fallback) => (back == null ? fallback : back === 'today' ? '/' : `/${back}`);
+/** The `?back=` suffix for a link onward, carrying the origin through. */
+const backQuery = (back) => (back == null ? '' : `?back=${encodeURIComponent(back)}`);
+
+/** One saved route as a tappable row: name, optional subtitle, distance. */
+function routeRow(r, open, { sub = null, pill = null } = {}) {
+  return onTap(
+    el(
+      'button.listitem',
+      { type: 'button', dataset: { routeId: r.id } },
+      el('span.listitem-mark.listitem-mark--run'),
+      el('span.grow', null, el('div.listitem-title', { text: r.name }), sub ? el('div.listitem-sub', { text: sub }) : null),
+      el('span.num', { style: { fontWeight: 700 }, text: `${r.km.toFixed(2)} km` }),
+      pill,
+    ),
+    open,
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Routes that fit a run — shown on Today's run card and a Calendar run day
+// ---------------------------------------------------------------------------
+
+/**
+ * The saved routes that fit a run's target, plus a way to plan a new one.
+ * Suggested, never attached: the route for a run is still chosen in the
+ * session's "Which route?" card, and nothing is stored against the day.
+ *
+ * @param target  the resolved run's `target` ({kind:'distance', km} | {kind:'time', minutes})
+ * @param o.back  where planning returns to ('today', 'calendar?day=…')
+ * @param o.go    navigation; a sheet passes one that closes itself first
+ */
+export function routeFitCard(target, { back, go = navigate } = {}) {
+  const { routes, sessions } = store.getState();
+  const pace = target.kind === 'time' ? easyPaceSecPerKm(sessions) : null;
+  const fit = routesThatFit(routes, target, { paceSecPerKm: pace });
+
+  const within = `${Math.round(FIT_TOLERANCE * 100)}%`;
+  const note =
+    !routes.length
+      ? 'No saved routes yet. Plan a loop once and it is suggested whenever it fits.'
+      : fit.match === 'unmatched'
+        ? `No easy run in the last ${EASY_PACE_WINDOW_DAYS / 7} weeks to take a pace from, so every route, shortest first.`
+        : fit.match === 'estimate'
+          ? `${target.minutes} min at your easy pace (${formatPace(pace)}) is about ${fit.km.toFixed(1)} km — an estimate. Routes within ${within} of it.`
+          : `Routes within ${within} of ${fit.km} km.`;
+
+  const list = el('div.listgroup');
+  for (const r of fit.routes) list.appendChild(routeRow(r, () => go(`/routes/${r.id}${backQuery(back)}`)));
+
+  return el(
+    'div.stack',
+    { style: { gap: '0.5rem' }, dataset: { routeFit: fit.match } },
+    el(
+      'div.row',
+      { style: { gap: '0.4rem', alignItems: 'center' } },
+      el('span.eyebrow', { text: fit.match === 'unmatched' ? 'Your routes' : 'Routes that fit' }),
+      fit.match === 'estimate' ? el('span.pill', { text: 'ESTIMATE' }) : null,
+    ),
+    el('p.xs.dim', { text: note }),
+    fit.routes.length ? list : routes.length ? el('p.small.muted', { text: `None of your ${routes.length} routes is that distance.` }) : null,
+    el(
+      'div.btn-row',
+      null,
+      onTap(el('button.btn.btn--sm', { type: 'button', text: '+ Plan a route' }), () => go(`/routes/new${backQuery(back)}`)),
+      routes.length
+        ? onTap(el('button.btn.btn--sm.btn--ghost', { type: 'button', text: `All routes · ${routes.length}` }), () => go(`/routes${backQuery(back)}`))
+        : null,
+    ),
+  );
+}
+
 // ---------------------------------------------------------------------------
 // List
 // ---------------------------------------------------------------------------
@@ -42,7 +117,7 @@ export function mountRoutes(root) {
   const screen = el('div.screen');
   root.appendChild(screen);
   const params = hashParams();
-  const backTo = params.back ? `/${params.back}` : '/';
+  const backTo = backPath(params.back, '/');
 
   const render = () => {
     const { routes } = store.getState();
@@ -62,17 +137,10 @@ export function mountRoutes(root) {
     for (const r of routes) {
       const near = target.long && Math.abs(r.km - target.long) / target.long <= 0.03;
       list.appendChild(
-        onTap(
-          el(
-            'button.listitem',
-            { type: 'button', dataset: { routeId: r.id } },
-            el('span.listitem-mark.listitem-mark--run'),
-            el('span.grow', null, el('div.listitem-title', { text: r.name }), el('div.listitem-sub', { text: `${r.waypoints.length} corners · ${formatRelativeDate(new Date(r.updatedAt).toISOString().slice(0, 10))}` })),
-            el('span.num', { style: { fontWeight: 700 }, text: `${r.km.toFixed(2)} km` }),
-            near ? el('span.pill.pill--good', { text: 'TARGET' }) : null,
-          ),
-          () => navigate(`/routes/${r.id}${params.back ? `?back=${params.back}` : ''}`),
-        ),
+        routeRow(r, () => navigate(`/routes/${r.id}${backQuery(params.back)}`), {
+          sub: `${r.waypoints.length} corners · ${formatRelativeDate(new Date(r.updatedAt).toISOString().slice(0, 10))}`,
+          pill: near ? el('span.pill.pill--good', { text: 'TARGET' }) : null,
+        }),
       );
     }
 
@@ -81,7 +149,7 @@ export function mountRoutes(root) {
         'div.stack-lg',
         null,
         onTap(el('button.btn.btn--primary.btn--block', { type: 'button', text: '+ Plan a new route' }), () =>
-          navigate(`/routes/new${params.back ? `?back=${params.back}` : ''}`),
+          navigate(`/routes/new${backQuery(params.back)}`),
         ),
         routes.length
           ? list
@@ -106,7 +174,7 @@ export function mountRoutePlanner(root, params) {
   root.appendChild(screen);
   const q = hashParams();
   const existing = params.id && params.id !== 'new' ? store.getRoute(params.id) : null;
-  const backTo = q.back ? `/${q.back}` : '/routes';
+  const backTo = backPath(q.back, '/routes');
 
   let waypoints = existing ? existing.waypoints.map((p) => ({ ...p })) : [];
   let name = existing?.name ?? '';

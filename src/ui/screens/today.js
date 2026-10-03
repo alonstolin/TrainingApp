@@ -14,6 +14,7 @@ import { getExercise } from '../../program/exercises.js';
 import { backupNudge } from '../../data/backup.js';
 import { trainingDate, formatRelativeDate, dayName } from '../../core/dates.js';
 import { navigate } from '../../router.js';
+import { routeFitCard } from './routes.js';
 
 const TRACK_LABEL = { lift: 'Lift', run: 'Run', core: 'Core' };
 const ROLE_LABEL = { probe: 'probe week', test: 'test week', deload: 'deload' };
@@ -225,6 +226,9 @@ function sessionCard(card, { hero = false } = {}) {
 
   return body;
 }
+
+/** The saved routes that fit a run card's target; planning one comes back here. */
+const routesFor = (card) => el('div.card', null, routeFitCard(card.session.target, { back: 'today' }));
 
 export default function mountToday(root) {
   const screen = el('div.screen');
@@ -497,6 +501,7 @@ export default function mountToday(root) {
           onTap(el('button.btn.btn--ghost', { type: 'button', text: 'Skip' }), () => skipCard(card, rerender)),
         ),
       );
+      if (card.track === 'run') group.appendChild(routesFor(card));
       blocks.appendChild(group);
     }
 
@@ -509,6 +514,8 @@ export default function mountToday(root) {
             startAndGo(card.session),
           ),
         );
+        // Beside the card, not inside it: the card is one big start button.
+        if (card.track === 'run') group.appendChild(routesFor(card));
       }
       blocks.appendChild(group);
     }

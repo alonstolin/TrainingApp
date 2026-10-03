@@ -100,6 +100,24 @@ export function runSeries(sessions, { variant } = {}) {
     }));
 }
 
+/** How far back an easy run still counts toward the athlete's easy pace. */
+export const EASY_PACE_WINDOW_DAYS = 28;
+
+/**
+ * The athlete's easy pace: the median s/km of recent easy runs. The median,
+ * not the mean, so one walk-run day does not drag it. Null with no recent
+ * easy run — a stale pace would quietly mislead a time target.
+ */
+export function easyPaceSecPerKm(sessions, today = trainingDate()) {
+  const paces = runSeries(sessions, { variant: 'easy' })
+    .filter((r) => r.pace && r.date <= today && daysBetween(r.date, today) <= EASY_PACE_WINDOW_DAYS)
+    .map((r) => r.pace)
+    .sort((a, b) => a - b);
+  if (!paces.length) return null;
+  const mid = Math.floor(paces.length / 2);
+  return paces.length % 2 ? paces[mid] : (paces[mid - 1] + paces[mid]) / 2;
+}
+
 /** Weekly running distance, Monday-anchored, with empty weeks filled in as zero. */
 export function weeklyRunVolume(sessions, today = trainingDate()) {
   const runs = runSeries(sessions);

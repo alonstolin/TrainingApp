@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { fixDay, TUESDAY } from './_helpers.js';
 
 /**
  * Route planning on a real map. Tiles are aborted (nothing leaves the test
@@ -156,4 +157,82 @@ test('routes round-trip through a backup', async ({ page }) => {
     return { inPayload: payload.routes.length, gone, ok: r.ok, after: store.getState().routes.length, name: store.getState().routes[0]?.name };
   }, SQUARE);
   expect(before).toEqual({ inPayload: 1, gone: 0, ok: true, after: 1, name: 'Square' });
+});
+
+// ---------------------------------------------------------------------------
+// Routes that fit, on Today and the Calendar (issue #4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Tuesday 22 Sep 2026, run week 1: a 20-min easy run today, a 25-min long run
+ * on Saturday. One easy run banked on Sunday (3 km in 20 min, 6:40 /km) gives
+ * a pace, so 20 min ≈ 3 km and 25 min ≈ 3.75 km. Three sides of the square
+ * (~3 km) fit the first, the closed loop (~4 km) the second.
+ */
+const seedRoutesAndPace = (page) =>
+  page.evaluate(async (pts) => {
+    const store = await import('./src/data/store.js');
+    const { closeLoop } = await import('./src/core/routes.js');
+    const { CURRENT_PROGRAM } = await import('./src/program/index.js');
+    const { resolveRunSession } = await import('./src/core/prescribe.js');
+    store.saveRoute({ name: 'L-shape', waypoints: pts.slice(0, 4) });
+    store.saveRoute({ name: 'Loop', waypoints: closeLoop(pts) });
+    const s = store.startSession(resolveRunSession(CURRENT_PROGRAM, 'easy', 1), { date: '2026-09-20' });
+    store.completeSession(s.id, { run: { distanceKm: 3, durationSec: 1200, effort: 3, talkTest: 'yes' } });
+    await store.flush();
+  }, SQUARE);
+
+test("Today's run card suggests the routes that fit and plans one, coming back to Today", async ({ page }) => {
+  await fixDay(page, TUESDAY);
+  await blockTiles(page);
+  await boot(page);
+  await seedRoutesAndPace(page);
+  await page.goto('./#/');
+
+  const fit = page.locator('[data-route-fit]');
+  await expect(fit).toHaveAttribute('data-route-fit', 'estimate');
+  await expect(fit).toContainText('ESTIMATE');
+  await expect(fit.locator('[data-route-id]')).toHaveCount(1);
+  await expect(fit.locator('[data-route-id]')).toContainText('L-shape');
+
+  await fit.locator('button', { hasText: 'Plan a route' }).click();
+  await page.waitForFunction(() => !!window.__planner);
+  await page.locator('button', { hasText: '‹ Back' }).click();
+  await expect(page.locator('[data-route-fit]')).toBeVisible();
+  expect(new URL(page.url()).hash).toBe('#/');
+});
+
+test('a planned run day in the Calendar previews its target and the routes that fit, and planning comes back to it', async ({ page }) => {
+  await fixDay(page, TUESDAY);
+  await blockTiles(page);
+  await boot(page);
+  await seedRoutesAndPace(page);
+  await page.goto('./#/calendar');
+
+  await page.locator('.listitem', { hasText: 'Long Run' }).first().click();
+  const sheet = page.locator('.sheet');
+  await expect(sheet).toContainText('Target: 25 min');
+  const fit = sheet.locator('[data-route-fit]');
+  await expect(fit).toHaveAttribute('data-route-fit', 'estimate');
+  await expect(fit.locator('[data-route-id]')).toHaveCount(1);
+  await expect(fit.locator('[data-route-id]')).toContainText('Loop');
+
+  await fit.locator('button', { hasText: 'Plan a route' }).click();
+  await page.waitForFunction(() => !!window.__planner);
+  await expect(page.locator('.sheet')).toHaveCount(0);
+  await page.locator('button', { hasText: '‹ Back' }).click();
+  // Back on the same planned day, not just the Calendar tab.
+  await expect(page.locator('.sheet [data-route-fit]')).toBeVisible();
+  await expect(page.locator('.sheet')).toContainText('Target: 25 min');
+
+  // Nothing was stored against the day: suggesting is all it does.
+  const runs = await page.evaluate(async () => (await import('./src/data/store.js')).getState().sessions.filter((s) => s.kind === 'run').length);
+  expect(runs).toBe(1);
+});
+
+test('the routes button is gone from Progress', async ({ page }) => {
+  await boot(page);
+  await page.goto('./#/progress');
+  await expect(page.locator('.page-title')).toHaveText('Progress');
+  await expect(page.locator('button', { hasText: /Your routes|Plan a route/ })).toHaveCount(0);
 });

@@ -48,3 +48,5 @@ export const startLift = (page, name = 'Upper Push') => startVia(page, name);
  */
 export const MONDAY = new Date(2026, 8, 21, 10, 0, 0); // 21 Sep 2026, local
 export const fixDay = (page, when = MONDAY) => page.clock.setFixedTime(when);
+/** Tuesday is an easy-run day: the Today screen leads with a run. */
+export const TUESDAY = new Date(2026, 8, 22, 10, 0, 0); // 22 Sep 2026, local
