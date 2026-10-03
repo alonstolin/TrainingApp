@@ -76,7 +76,7 @@ Three bugs here were all "the CSS said something that was not true", so the app 
 
 ### The coaching loop
 
-`coach/` is the review side of the app: `tools/review.mjs` turns a backup JSON into a Markdown report by running the same `src/core/` modules the app runs and applying the synthesis's rules; `coach/DECISIONS.md` (committed) is the dated log of program decisions; `coach/data/` and `coach/reports/` are gitignored because the repo is public. The `/review` skill (`.claude/skills/review/SKILL.md`) drives it. A program change found in review still goes through the Opus reviewer agent before `src/program/` changes (deviations get recorded in `DECISIONS.md` rather than assumed). `tools/physique.mjs` + `coach/PHYSIQUE.md` + the `physique-analyst` agent are the parallel loop for "what is lagging, what is asymmetrical"; nothing photographic touches the app or the repo. `tests/unit/review.test.mjs` simulates six weeks of v3 and checks the report end to end. Two rules there are easy to get subtly wrong and have named tests: a probe is judged against the reference it was lifted AGAINST (comparing it to the reference after its own back-offs raised it made every good session look like a 3% shortfall), and a stall is counted in complete blocks (the `stalls` counter resets on the deload after a test week, so "two blocks without an increment" is unreachable through it).
+`coach/` is the review side of the app: `tools/review.mjs` turns a backup JSON into a Markdown report by running the same `src/core/` modules the app runs and applying the synthesis's rules; `coach/DECISIONS.md` (committed) is the dated log of program decisions; `coach/data/` and `coach/reports/` are gitignored because the repo is public. **`coach/DECISIONS.md` and `docs/adr/` (see `docs/agents/domain.md`) are scoped by subject, not by which tool touched the file:** a decision about what the program prescribes or how a session is validated — a new exercise, a changed scheme, a progression rule, a version bump's rationale — goes in `coach/DECISIONS.md`, even if the change was made editing code. A decision about the app's own architecture — storage schema, service-worker strategy, a UI convention — goes in `docs/adr/`, even if a research agent's findings motivated it. The R1 monotone-reference fix and the `sessionIntegrity` version-bump invariant are two decisions already in this codebase, as comments only, that would read as ADRs if written up. The `/review` skill (`.claude/skills/review/SKILL.md`) drives it. A program change found in review still goes through the Opus reviewer agent before `src/program/` changes (deviations get recorded in `DECISIONS.md` rather than assumed). `tools/physique.mjs` + `coach/PHYSIQUE.md` + the `physique-analyst` agent are the parallel loop for "what is lagging, what is asymmetrical"; nothing photographic touches the app or the repo. `tests/unit/review.test.mjs` simulates six weeks of v3 and checks the report end to end. Two rules there are easy to get subtly wrong and have named tests: a probe is judged against the reference it was lifted AGAINST (comparing it to the reference after its own back-offs raised it made every good session look like a 3% shortfall), and a stall is counted in complete blocks (the `stalls` counter resets on the deload after a test week, so "two blocks without an increment" is unreachable through it).
 
 ### Maps and routes
 
@@ -102,3 +102,13 @@ Cache-first, precache-everything, `updateViaCache: 'none'` (GitHub Pages serves 
 - `tests/unit/_fixtures.mjs` has session/set builders and the loaded program (`program` is v3, `v2` the legacy file).
 - **Never assume today's hero button starts a lift** — the Today screen serves the real weekday, so it is a run at weekends and nothing on Thursdays. Use `startLift`/`startVia` from `tests/e2e/_helpers.js`, and `fixDay` when a spec genuinely needs a given weekday.
 - e2e specs that start a pull-up day must accept the bodyweight sheet first (`acceptBodyweight` in `_helpers.js`). Seeding lifts programmatically goes through `store.cursors()` for the role and `resolveSession` with `{ role, coreCompleted, historyFor, bodyweightKg }` — see `deload.spec.js`.
+
+## Agent skills
+
+### Issue tracker
+
+Issues live in GitHub Issues (`alonstolin/TrainingApp`), via the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Domain docs
+
+Single-context: one `GLOSSARY.md` and `docs/adr/` at the repo root. See `docs/agents/domain.md`.
