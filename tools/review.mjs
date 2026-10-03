@@ -24,6 +24,7 @@ import {
 import {
   coreAdherence, easyRunEffortByWeekday, weeklyRunVolume, runSeries, weeklyVolumeByMuscle, targetBand,
 } from '../src/core/stats.js';
+import { attendanceLedger, shortfallByMuscle } from '../src/core/attendance.js';
 import { startOfWeek, addDays, daysBetween, formatDuration, trainingDate } from '../src/core/dates.js';
 import { PROGRAMS, CURRENT_PROGRAM, getExercise, MAIN_LIFTS, MUSCLE_LABELS } from '../src/program/index.js';
 import { setIncrementOverrides } from '../src/program/exercises.js';
@@ -427,6 +428,64 @@ else {
   });
   table(['Muscle', 'Mean/wk', 'By week', 'vs v3 target'], rows);
   p(`Weeks counted: ${trained.length} of ${volWeeks.length} (weeks with no lifting are excluded).`);
+}
+
+// ---------------------------------------------------------------------------
+// 4c. Shortfall since v3 — the same ledger the Progress tab reads
+// ---------------------------------------------------------------------------
+
+h(2, 'Shortfall since v3');
+p(
+  'Every week since v3, counted against the template week of the program version in force that week, under that ' +
+    'week\'s role — a deload is measured against the deload. Bonus-day sets count as performed. A skipped session costs ' +
+    'its day\'s muscles; a missed day costs none, because it is still owed. Read whether the athlete showed up before ' +
+    'reading what it cost: short with full attendance is the only case that argues for more volume.',
+);
+const ledgerFrom = meta.v3StartedAt?.date;
+if (!ledgerFrom) p('_no v3 start recorded in the backup_');
+else {
+  const ledger = attendanceLedger(sessions, { from: ledgerFrom, to: today, meta });
+
+  h(3, 'Sessions per week');
+  table(
+    ['Week of', 'Program', 'Role', 'Sessions', 'Attendance'],
+    ledger.map((w) => {
+      const gaps = [w.skipped.length && `${w.skipped.length} skipped`, w.missed && `${w.missed} missed`].filter(Boolean);
+      const attendance = [
+        w.partial && (w.weekStart < ledgerFrom ? `v3 began ${ledgerFrom}` : 'in progress'),
+        ...gaps,
+        !w.partial && !gaps.length && 'complete',
+      ].filter(Boolean).join(' · ');
+      return [w.weekStart, `v${w.version}`, w.role, `${w.sessions.done} of ${w.sessions.template}`, attendance];
+    }),
+  );
+
+  h(3, 'Skip ledger');
+  const skips = ledger.flatMap((w) => w.skipped);
+  if (!skips.length) p('_no skipped sessions_');
+  else table(['Date', 'Day'], skips.map((s) => [s.date, s.name]));
+
+  h(3, 'Shortfall by muscle');
+  const READING = {
+    attendance: 'attendance — a schedule problem',
+    volume: '**volume** — short with full attendance',
+    mixed: 'mixed — attendance first, then volume',
+  };
+  const short = shortfallByMuscle(ledger);
+  if (!short.length) p('_no muscle short since v3_');
+  else {
+    table(
+      ['Muscle', 'Short', 'With full attendance', 'In weeks with skips or misses', 'Reading'],
+      short.map((m) => [
+        m.label,
+        m.shortfall,
+        m.fullAttendance,
+        m.incompleteAttendance,
+        READING[m.reading],
+      ]),
+    );
+    p('Direct sets. A week only partly inside the period (the v3 entry week, the current week) charges only the days settled inside it.');
+  }
 }
 
 // ---------------------------------------------------------------------------

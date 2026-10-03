@@ -13,7 +13,7 @@
  */
 
 // <<<GENERATED-VERSION-START>>>
-const VERSION = '2026.10.03-0b49f589';
+const VERSION = '2026.10.03-8c9ec088';
 // <<<GENERATED-VERSION-END>>>
 
 const CACHE = `training-${VERSION}`;
@@ -56,6 +56,7 @@ const PRECACHE = [
   './assets/icons/icon-512.png',
   './index.html',
   './manifest.webmanifest',
+  './src/core/attendance.js',
   './src/core/calendar.js',
   './src/core/dates.js',
   './src/core/geo.js',

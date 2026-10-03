@@ -10,6 +10,7 @@ import { deriveCursors, makeHistoryLookup } from '../../src/core/schedule.js';
 import { buildBackup } from '../../src/core/schema.js';
 import { addDays, dayOfWeek } from '../../src/core/dates.js';
 import { targetBand } from '../../src/core/stats.js';
+import { attendanceLedger, shortfallByMuscle } from '../../src/core/attendance.js';
 import { MUSCLE_LABELS } from '../../src/program/exercises.js';
 import { program } from './_fixtures.mjs';
 
@@ -30,7 +31,7 @@ after(() => {
  * section is there, and the rules fire on the data that should fire them.
  */
 
-function simulate() {
+function simulate({ skip = [] } = {}) {
   const sessions = [];
   const meta = {
     startDate: '2026-09-14', bodyweightKg: 82, programVersion: 3, gyms: [{ id: 'g1', name: 'Home' }, { id: 'g2', name: 'Downtown' }], lastGymId: 'g1',
@@ -54,6 +55,8 @@ function simulate() {
       const key = c.lift.nextDayKey;
       const r = resolveSession(program, key, { role: c.role, weekInMeso: c.weekInMeso, coreCompleted: c.core.completed, historyFor: makeHistoryLookup(sessions), bodyweightKg: 82, gymId: dow === 5 ? 'g2' : 'g1' });
       const s = liftFrom(`l-${n++}`, date, r, BASE, dow === 5 ? 'g2' : 'g1', d >= 35 ? 2 : 4);
+      // A skipped session closes the day without training, as store.skipSession does.
+      if (skip.includes(date)) Object.assign(s, { status: 'skipped', entries: [] });
       sessions.push(s);
     }
     if (dow === 2) sessions.push(run(`e-${n++}`, date, 'easy', 4.5, d > 14 ? 6 : 4, d > 14 ? 'no' : 'yes', c.run.week));
@@ -306,4 +309,42 @@ test('the report counts direct sets per muscle, which is the log half of "what i
   assert.ok(banded >= 6, `only ${banded} muscles carried a band:\n${section}`);
   // Weeks with no lifting must not be averaged in as zeros.
   assert.match(section, /Weeks counted: \d+ of \d+/);
+});
+
+test('the shortfall section reads sessions, then skips, then shortfall, with the core ledger\'s numbers', () => {
+  // Upper Push skipped in week 2 of the simulation.
+  const { meta, sessions } = simulate({ skip: ['2026-09-23'] });
+  const payload = buildBackup(meta, sessions, [], 'test');
+  payload.exportedAt = '2026-10-26T10:00:00.000Z';
+  const dir = tmp();
+  const file = path.join(dir, 'backup.json');
+  fs.writeFileSync(file, JSON.stringify(payload));
+  const md = runTool(['tools/review.mjs', file, '--stdout']).stdout;
+
+  const start = md.indexOf('## Shortfall since v3');
+  assert.ok(start > md.indexOf('## Volume per muscle') && start < md.indexOf('## Running'), 'placed after volume, before running');
+  const section = md.slice(start, md.indexOf('## Running'));
+  const at = (h) => section.indexOf(h);
+  assert.ok(at('### Sessions per week') > 0 && at('### Sessions per week') < at('### Skip ledger') && at('### Skip ledger') < at('### Shortfall by muscle'),
+    'cause before cost: sessions → skip ledger → shortfall');
+
+  const ledger = attendanceLedger(sessions, { from: meta.v3StartedAt.date, to: '2026-10-26', meta });
+  assert.equal(ledger.length, 7, 'every week since v3, the current one included');
+  for (const w of ledger) {
+    const r = section.match(new RegExp(`\\| ${w.weekStart} \\| v(\\d+) \\| (\\w+) \\| (\\d+) of (\\d+) \\|`));
+    assert.ok(r, `week ${w.weekStart} missing:\n${section}`);
+    assert.deepEqual([Number(r[1]), r[2], Number(r[3]), Number(r[4])], [w.version, w.role, w.sessions.done, w.sessions.template]);
+  }
+  assert.match(section, /\| 2026-09-23 \| Upper Push \|/);
+
+  const short = shortfallByMuscle(ledger);
+  assert.ok(short.some((m) => m.muscle === 'triceps'), 'the skipped Upper Push left triceps short');
+  for (const m of short) {
+    const r = section.match(new RegExp(`\\| ${m.label} \\| (\\d+) \\| (\\d+) \\| (\\d+) \\| ([^|]+) \\|`));
+    assert.ok(r, `${m.label} missing:\n${section}`);
+    assert.deepEqual([Number(r[1]), Number(r[2]), Number(r[3])], [m.shortfall, m.fullAttendance, m.incompleteAttendance], m.label);
+  }
+  const triceps = section.match(/\| Triceps \|[^\n]*\| ([^|]+) \|\n/);
+  assert.match(triceps[1], /attendance/, 'short because skipped reads as a schedule problem');
+  assert.doesNotMatch(triceps[1], /volume/);
 });

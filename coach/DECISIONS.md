@@ -4,6 +4,60 @@ Dated. Newest first. Each entry says what changed, what data or evidence it
 rested on, and where the detail lives. This is the memory of the program that
 survives any chat.
 
+## 2026-10-03 — How a week is judged for shortfall
+
+**What:** the shortfall ledger (`core/attendance.js`, issue #3) judges every week
+since v3 against the program, and the review report gains a "Shortfall since v3"
+section built on it. The Progress tab will read the same function. The rules:
+
+- A week counts against the **template week of the program version in force
+  that week**: the version its sessions recorded (the latest, if it changed
+  mid-week). A week with no sessions takes the version in force at the end of
+  the week before, or the current program if there is none.
+- The template is resolved **under that week's role**, through the same
+  resolver the app prescribes with, so a **deload** week is measured against
+  the deload's halved sets and shows no phantom shortfall. The role is the one
+  the week's sessions recorded; a week without any takes the role the engine
+  would have served on its Monday.
+- **Bonus-day** sets count as performed and can pay a shortfall back. The bonus
+  day never counts toward the session target.
+- A **skipped session** costs its day's direct sets: shortfall is owed for every
+  day the week settled, completed or skipped. A **missed day** costs no muscle,
+  because the cursor still owes it. It shows only as a lower session count. So
+  per muscle the ledger carries `template` (the whole template week), `owed`
+  (the settled part of it) and `performed`. Shortfall is owed minus performed.
+- A week only partly inside the period is **partial**. That covers the v3 entry
+  week, since v3 began on a Sunday, and the current week. Days outside the
+  period are neither done nor missed. A partial week's attendance is judged on
+  the days settled so far. Otherwise a set dropped this week would read as a
+  schedule problem.
+- Each muscle's shortfall is split by whether the week that produced it had
+  **complete attendance** (every template day done, nothing skipped or missed).
+  Short with full attendance is the only case that argues for more volume.
+  Short in weeks with skips or misses is a schedule problem.
+
+**Basis:** the design discussion in issue #1. A per-muscle count alone cannot
+tell a muscle the program under-doses from one whose day was skipped, and the
+two call for opposite responses. The partial-week rule came from running the
+ledger on the 2026-10-01 backup. Without it, the entry week charged two v2
+sessions against the v3 template.
+
+**Note:** the issue named the Upper Pull swap (v3 → v4) as the fixture for
+"an earlier version counts against its own template". That swap moves no direct
+set, because the lat pulldown and the straight-arm pulldown both credit back,
+and versions 3 and 4 resolve to the same file. The test pins the version
+recorded per week on that fixture. A separate test uses a hypothetical earlier
+version, one set different, to show the version's own template is the one
+charged.
+
+**Known limit:** the ledger is only as faithful to old weeks as the program
+registry. Versions 3, 4 and 5 all map to `program.v3.js`. An in-place edit that
+changes a day's set counts would therefore re-judge every past week under those
+versions, which is what "editing the program doesn't rewrite my past shortfall"
+(#1) asks to avoid. No edit so far has changed a direct-set count. A future one
+that does should split the file, or the ledger should move to each session's
+frozen `prescriptionSnapshot` for the days it settled.
+
 ## 2026-10-03 — Volume targets move into the program (program v5)
 
 **What:** the weekly direct-set band per muscle (SYNTHESIS §2.1) is now program
